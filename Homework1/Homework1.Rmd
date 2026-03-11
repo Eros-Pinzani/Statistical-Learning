@@ -1,0 +1,191 @@
+---
+title: "Omitted Variables Problem"
+author: "Eros Pinzani"
+output:
+  pdf_document:
+    toc: false
+    number_sections: false
+    fig_caption: true
+    highlight: tango
+    keep_tex: false
+header-includes:
+  - \usepackage{xcolor}
+  - \usepackage{fancyvrb}
+  - \usepackage{framed}
+  - \usepackage{float}
+  - \usepackage{caption}
+  - \definecolor{shadecolor}{RGB}{230,230,230}
+  - \DefineVerbatimEnvironment{Highlighting}{Verbatim}{fontsize=\small,commandchars=\\\{\}}
+  - \RecustomVerbatimEnvironment{verbatim}{Verbatim}{fontsize=\footnotesize,frame=single,framesep=3mm,rulecolor=\color{darkgray}}
+  - \definecolor{darkgray}{RGB}{180,180,180}
+---
+
+Impostare un esperimento di Monte Carlo per capire le conseguenze dell'omissione di una covariata rilevante.
+
+\underline{DGP}
+
+\begin{equation}
+    y_i = \beta_0 + \beta_1 x_{1i} + \beta_2 x_{2i} + u_i
+\end{equation}
+
+\begin{equation}
+    \epsilon_i \sim N(0,1)
+\end{equation}
+
+\begin{equation}
+    x_{1}, x_{2} \sim N_{2}(\underline{0},\Sigma)
+\end{equation}
+
+Nello scenario 1: $$\Sigma = \begin{bmatrix}1 & 0.5 \\ 0.5 & 1\end{bmatrix}$$
+
+Nello scenario 2: $$\Sigma = \begin{bmatrix}1 & 0 \\ 0 & 1\end{bmatrix}$$
+
+Ad ogni simulazione:
+\begin{enumerate}
+    \item Generare i dati da scenario 1
+    \item Stimare i parametri di un modello di regressione lineare con solo $x_{1}$ come predittore. Salvare la stima di $\beta_1$.
+    \item Stimare i parametri di un modello di regressione lineare con $x_{1}$ e $x_{2}$ come predittori. Salvare la stima di $\beta_1$.
+\end{enumerate}
+
+Confrontare le distribuzioni Monte Carlo per i due scenari.
+\newline
+\underline{Nota Bene}: Provare cosa succede al variare di $\beta_1$ e $\beta_2$. Provate ad esempio $\beta_1 = 1$ e $\beta_2 = -2$.
+
+\newpage
+
+## Generazione dei dati
+```{r}
+set.seed(123)
+n <- 1000
+beta_0 <- 0
+beta_1 <- 1
+beta_2 <- -2
+sigma1 <- matrix(c(1, 0.5, 0.5, 1), nrow = 2)
+sigma2 <- matrix(c(1, 0, 0, 1), nrow = 2)
+library(MASS)
+# Funzione per generare i dati
+generate_data <- function(sigma) {
+    x <- mvrnorm(n, mu = c(0, 0), Sigma = sigma)
+    u <- rnorm(n, mean = 0, sd = 1)
+    y <- beta_0 + beta_1 * x[, 1] + beta_2 * x[, 2] + u
+    data.frame(y = y, x1 = x[, 1], x2 = x[, 2])
+}
+# Generazione dei dati per entrambi gli scenari
+data1 <- generate_data(sigma1)
+data2 <- generate_data(sigma2)
+```
+## Stima dei modelli
+```{r}
+# Funzione per stimare i modelli
+estimate_models <- function(data) {
+    model1 <- lm(y ~ x1, data = data)
+    model2 <- lm(y ~ x1 + x2, data = data)
+    c(beta1_model1 = unname(coef(model1)["x1"]), beta1_model2 = unname(coef(model2)["x1"]))
+}
+# Stima dei modelli per entrambi gli scenari
+results1 <- estimate_models(data1)
+results2 <- estimate_models(data2)
+results1
+results2
+```
+
+Per entrambi gli scenari, il modello completo (con $x_1$ e $x_2$) stima $\hat{\beta}_1 \approx 1$, ovvero il valore vero. Il modello omesso (con solo $x_1$) produce invece una stima distorta nello **Scenario 1** (dove $x_1$ e $x_2$ sono correlati), mentre nello **Scenario 2** (variabili indipendenti) la stima rimane circa corretta.
+
+## Confronto delle distribuzioni Monte Carlo
+```{r, fig.height=8, fig.width=9}
+# Simulazione Monte Carlo
+n_sim <- 20000
+beta1_model1_scenario1 <- numeric(n_sim)
+beta1_model2_scenario1 <- numeric(n_sim)
+beta1_model1_scenario2 <- numeric(n_sim)
+beta1_model2_scenario2 <- numeric(n_sim)
+
+for (i in 1:n_sim) {
+    data1 <- generate_data(sigma1)
+    data2 <- generate_data(sigma2)
+    results1 <- estimate_models(data1)
+    results2 <- estimate_models(data2)
+    beta1_model1_scenario1[i] <- results1["beta1_model1"]
+    beta1_model2_scenario1[i] <- results1["beta1_model2"]
+    beta1_model1_scenario2[i] <- results2["beta1_model1"]
+    beta1_model2_scenario2[i] <- results2["beta1_model2"]
+}
+
+# Palette colori in stile laboratorio
+col_fill_omit <- "#D3EDEC"   # azzurro chiaro  - modello con variabile omessa
+col_fill_full <- "#D3EDEC"   # stesso fill, si distinguono per titolo/densità
+col_dens_omit <- "#990F3D"   # rosso scuro     - curva densità modello omesso
+col_dens_full <- "#0D7680"   # verde-teal      - curva densità modello completo
+col_true      <- "#593380"   # viola           - linea valore vero
+
+# Confronto delle distribuzioni
+par(mfrow = c(2, 2), mar = c(4, 4, 3, 1))
+
+# --- Scenario 1: Modello con variabile omessa ---
+hist(beta1_model1_scenario1,
+     probability = TRUE,
+     main = "Scenario 1: Omitted Variable",
+     xlab = expression(hat(beta)[1]),
+     col = col_fill_omit,
+     border = "white",
+     breaks = 30,
+     xlim = c(min(beta1_model1_scenario1), max(beta_1 + 0.2, max(beta1_model1_scenario1))))
+lines(density(beta1_model1_scenario1), col = col_dens_omit, lwd = 2.5)
+abline(v = beta_1, col = col_true, lwd = 2, lty = 2)
+abline(v = mean(beta1_model1_scenario1), col = col_dens_omit, lwd = 2, lty = 1)
+legend("topright", legend = c("Densità", expression(beta[1] == 1), expression(E(hat(beta)[1]))),
+       col = c(col_dens_omit, col_true, col_dens_omit), lty = c(1, 2, 1), lwd = 2, bty = "n", cex = 0.8)
+
+# --- Scenario 1: Modello completo ---
+hist(beta1_model2_scenario1,
+     probability = TRUE,
+     main = "Scenario 1: Full Model",
+     xlab = expression(hat(beta)[1]),
+     col = col_fill_full,
+     border = "white",
+     breaks = 30)
+lines(density(beta1_model2_scenario1), col = col_dens_full, lwd = 2.5)
+abline(v = beta_1, col = col_true, lwd = 2, lty = 2)
+legend("topright", legend = c("Densità", expression(beta[1] == 1)),
+       col = c(col_dens_full, col_true), lty = c(1, 2), lwd = 2, bty = "n", cex = 0.8)
+
+# --- Scenario 2: Modello con variabile omessa ---
+hist(beta1_model1_scenario2,
+     probability = TRUE,
+     main = "Scenario 2: Omitted Variable",
+     xlab = expression(hat(beta)[1]),
+     col = col_fill_omit,
+     border = "white",
+     breaks = 30)
+lines(density(beta1_model1_scenario2), col = col_dens_omit, lwd = 2.5)
+abline(v = beta_1, col = col_true, lwd = 2, lty = 2)
+legend("topright", legend = c("Densità", expression(beta[1] == 1)),
+       col = c(col_dens_omit, col_true), lty = c(1, 2), lwd = 2, bty = "n", cex = 0.8)
+
+# --- Scenario 2: Modello completo ---
+hist(beta1_model2_scenario2,
+     probability = TRUE,
+     main = "Scenario 2: Full Model",
+     xlab = expression(hat(beta)[1]),
+     col = col_fill_full,
+     border = "white",
+     breaks = 30)
+lines(density(beta1_model2_scenario2), col = col_dens_full, lwd = 2.5)
+abline(v = beta_1, col = col_true, lwd = 2, lty = 2)
+legend("topright", legend = c("Densità", expression(beta[1] == 1)),
+       col = c(col_dens_full, col_true), lty = c(1, 2), lwd = 2, bty = "n", cex = 0.8)
+```
+
+I quattro istogrammi mostrano la distribuzione Monte Carlo di $\hat{\beta}_1$ su `r n_sim` simulazioni. La curva sovrapposta rappresenta la densità empirica stimata, mentre la linea tratteggiata viola indica il valore vero $\beta_1 = `r beta_1`$.
+
+**Scenario 1** ($\text{Corr}(x_1, x_2) = 0.5$):
+
+- *Modello con variabile omessa*: la distribuzione di $\hat{\beta}_1$ è centrata lontano dal valore vero. Poiché $x_2$ è correlata con $x_1$ e ha effetto negativo ($\beta_2 = -2$), l'omissione trasferisce parte dell'effetto di $x_2$ su $\hat{\beta}_1$, producendo una stima sistematicamente distorta verso il basso (**omitted variable bias**).
+- *Modello completo*: la distribuzione è centrata sul valore vero $\beta_1 = 1$, confermando la consistenza dello stimatore OLS.
+
+**Scenario 2** ($\text{Corr}(x_1, x_2) = 0$):
+
+- *Modello con variabile omessa*: la distribuzione rimane centrata sul valore vero. Quando le covariate sono ortogonali, l'omissione di $x_2$ non introduce bias su $\hat{\beta}_1$, pur aumentandone leggermente la varianza.
+- *Modello completo*: distribuzione analoga allo Scenario 1, centrata su $\beta_1 = 1$.
+
+**Conclusione**: il bias da variabile omessa si manifesta **solo quando la variabile esclusa è correlata con i regressori inclusi**. In assenza di correlazione, l'omissione non distorce le stime, ma riduce l'efficienza del modello.
