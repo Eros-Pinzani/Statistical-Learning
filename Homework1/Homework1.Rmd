@@ -1,5 +1,6 @@
 ---
-title: "Omitted Variables Problem"
+title: "Problema della Variabile Omessa"
+subtitle: "Simulazione Monte Carlo"
 author: "Eros Pinzani"
 output:
   pdf_document:
@@ -52,6 +53,22 @@ Confrontare le distribuzioni Monte Carlo per i due scenari.
 \underline{Nota Bene}: Provare cosa succede al variare di $\beta_1$ e $\beta_2$. Provate ad esempio $\beta_1 = 1$ e $\beta_2 = -2$.
 
 \newpage
+
+## Obiettivo
+
+**Omissione di una variabile rilevante**: si stima un modello di regressione lineare escludendo un predittore che, nel processo generatore dei dati reale, ha un effetto non nullo sulla variabile dipendente.
+
+Questo notebook costruisce un **esperimento di Monte Carlo** per studiare le conseguenze di questa omissione sullo stimatore OLS di $\beta_1$. In particolare, vogliamo rispondere a due domande:
+
+1. **Quando l'omissione distorce le stime?** La risposta dipende dalla correlazione tra la variabile omessa e i regressori inclusi nel modello.
+2. **Di quanto?** La direzione e l'entità del bias dipendono sia dalla correlazione tra le covariate sia dall'effetto della variabile omessa sulla risposta.
+
+Per isolare questi due effetti, confrontiamo due scenari:
+
+- **Scenario 1**: $x_1$ e $x_2$ sono correlate ($\rho = 0.5$). L'omissione di $x_2$ inquina la stima di $\hat{\beta}_1$.
+- **Scenario 2**: $x_1$ e $x_2$ sono indipendenti ($\rho = 0$). L'omissione di $x_2$ non introduce distorsione.
+
+Ripetendo l'esperimento $20\,000$ volte, la distribuzione Monte Carlo di $\hat{\beta}_1$ rende visibile se lo stimatore è centrato sul valore vero $\beta_1 = 1$ oppure sistematicamente distorto.
 
 ## Generazione dei dati
 
@@ -125,11 +142,13 @@ Al termine, per ognuno dei quattro casi (2 scenari $\times$ 2 modelli), abbiamo 
 
 ```{r, fig.height=8, fig.width=9}
 # Simulazione Monte Carlo
-n_sim <- 20000
-beta1_omitted_s1 <- numeric(n_sim)
-beta1_full_s1    <- numeric(n_sim)
-beta1_omitted_s2 <- numeric(n_sim)
-beta1_full_s2    <- numeric(n_sim)
+n_sim <- 1000
+
+# Vettori per salvare le stime di beta1
+beta1_omitted_s1 <- c()
+beta1_full_s1    <- c()
+beta1_omitted_s2 <- c()
+beta1_full_s2    <- c()
 
 for (i in 1:n_sim) {
     data1 <- generate_data(sigma1)
@@ -142,7 +161,13 @@ for (i in 1:n_sim) {
     beta1_full_s2[i]    <- results2["beta1_full"]
 }
 
-# Palette colori in stile laboratorio
+c(beta1_omitted_s1 = round(mean(beta1_omitted_s1), 3),
+    beta1_full_s1 = round(mean(beta1_full_s1), 3),
+    beta1_omitted_s2 = round(mean(beta1_omitted_s2), 3),
+    beta1_full_s2 = round(mean(beta1_full_s2), 3),
+    beta_1 = beta_1)
+
+# Palette colori
 col_fill_omit <- "#D3EDEC"   # azzurro chiaro  - modello con variabile omessa
 col_fill_full <- "#D3EDEC"   # stesso fill, si distinguono per titolo/densità
 col_dens_omit <- "#990F3D"   # rosso scuro     - curva densità modello omesso
@@ -164,8 +189,9 @@ hist(beta1_omitted_s1,
 lines(density(beta1_omitted_s1), col = col_dens_omit, lwd = 2.5)
 abline(v = beta_1, col = col_true, lwd = 2, lty = 2)
 abline(v = mean(beta1_omitted_s1), col = col_dens_omit, lwd = 2, lty = 1)
-legend("topright", legend = c("Densità", expression(beta[1] == 1), expression(E(hat(beta)[1]))),
-       col = c(col_dens_omit, col_true, col_dens_omit), lty = c(1, 2, 1), lwd = 2, bty = "n", cex = 0.8)
+legend("topright", legend = c("Densità", expression(beta[1] == 1),
+    expression(E(hat(beta)[1]))), col = c(col_dens_omit, col_true, col_dens_omit),
+    lty = c(1, 2, 1), lwd = 2, bty = "n", cex = 0.8)
 
 # --- Scenario 1: Modello completo ---
 hist(beta1_full_s1,
@@ -177,8 +203,10 @@ hist(beta1_full_s1,
      breaks = 30)
 lines(density(beta1_full_s1), col = col_dens_full, lwd = 2.5)
 abline(v = beta_1, col = col_true, lwd = 2, lty = 2)
-legend("topright", legend = c("Densità", expression(beta[1] == 1)),
-       col = c(col_dens_full, col_true), lty = c(1, 2), lwd = 2, bty = "n", cex = 0.8)
+abline(v = mean(beta1_full_s1), col = col_dens_full, lwd = 2, lty = 1)
+legend("topright", legend = c("Densità", expression(beta[1] == 1),
+    expression(E(hat(beta)[1]))), col = c(col_dens_full, col_true, col_dens_full),
+    lty = c(1, 2, 1), lwd = 2, bty = "n", cex = 0.8)
 
 # --- Scenario 2: Modello con variabile omessa ---
 hist(beta1_omitted_s2,
@@ -190,8 +218,10 @@ hist(beta1_omitted_s2,
      breaks = 30)
 lines(density(beta1_omitted_s2), col = col_dens_omit, lwd = 2.5)
 abline(v = beta_1, col = col_true, lwd = 2, lty = 2)
-legend("topright", legend = c("Densità", expression(beta[1] == 1)),
-       col = c(col_dens_omit, col_true), lty = c(1, 2), lwd = 2, bty = "n", cex = 0.8)
+abline(v = mean(beta1_omitted_s2), col = col_dens_omit, lwd = 2, lty = 1)
+legend("topright", legend = c("Densità", expression(beta[1] == 1),
+    expression(E(hat(beta)[1]))), col = c(col_dens_omit, col_true, col_dens_omit),
+    lty = c(1, 2, 1), lwd = 2, bty = "n", cex = 0.8)
 
 # --- Scenario 2: Modello completo ---
 hist(beta1_full_s2,
@@ -203,8 +233,10 @@ hist(beta1_full_s2,
      breaks = 30)
 lines(density(beta1_full_s2), col = col_dens_full, lwd = 2.5)
 abline(v = beta_1, col = col_true, lwd = 2, lty = 2)
-legend("topright", legend = c("Densità", expression(beta[1] == 1)),
-       col = c(col_dens_full, col_true), lty = c(1, 2), lwd = 2, bty = "n", cex = 0.8)
+abline(v = mean(beta1_full_s2), col = col_dens_full, lwd = 2, lty = 1)
+legend("topright", legend = c("Densità", expression(beta[1] == 1),
+    expression(E(hat(beta)[1]))), col = c(col_dens_full, col_true, col_dens_full),
+    lty = c(1, 2, 1), lwd = 2, bty = "n", cex = 0.8)
 ```
 
 I quattro istogrammi mostrano la distribuzione Monte Carlo di $\hat{\beta}_1$ su `r n_sim` simulazioni. La curva sovrapposta rappresenta la densità empirica stimata, mentre la linea tratteggiata viola indica il valore vero $\beta_1 = `r beta_1`$.
