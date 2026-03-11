@@ -54,6 +54,17 @@ Confrontare le distribuzioni Monte Carlo per i due scenari.
 \newpage
 
 ## Generazione dei dati
+
+Prima di tutto fissiaomo un seme casuale (`set.seed`) per garantire la **riproducibilità** dei risultati: chiunque esegua il codice otterrà esattamente gli stessi numeri casuali.
+
+Definimamo poi i **parametri veri** del DGP:
+
+- $n = 1000$: numero di osservazioni per ogni simulazione.
+- $\beta_0 = 0$, $\beta_1 = 1$, $\beta_2 = -2$: coefficienti veri del modello. Sono i valori che vogliamo vedere se riusciamo a recuperare o meno con la stima OLS.
+- `sigma1` e `sigma2`: matrici di covarianza che determinano la struttura di dipendenza tra $x_1$ e $x_2$. Nello **Scenario 1** le due variabili sono correlate ($\rho = 0.5$), nello **Scenario 2** sono indipendenti ($\rho = 0$).
+
+La funzione `generate_data(sigma)` incapsula tutta la logica di generazione: campiona le covariate dalla distribuzione normale bivariata usando `mvrnorm` (pacchetto `MASS`), genera il termine di errore $u_i \sim N(0,1)$ e costruisce $y$ secondo il DGP.
+
 ```{r}
 set.seed(123)
 n <- 1000
@@ -75,12 +86,20 @@ data1 <- generate_data(sigma1)
 data2 <- generate_data(sigma2)
 ```
 ## Stima dei modelli
+
+Qui stimiamo due modelli di regressione OLS sui dati generati, per ciascuno dei due scenari:
+
+- **Modello omesso** (`model1`): include solo $x_1$ come predittore. È il modello "sbagliato" perché ignora $x_2$, che nel DGP ha un effetto reale ($\beta_2 = -2$).
+- **Modello completo** (`model2`): include entrambi $x_1$ e $x_2$. È il modello "corretto", specificato esattamente come il DGP.
+
+La funzione `estimate_models` restituisce la stima di $\hat{\beta}_1$ da entrambi i modelli, così possiamo confrontarle direttamente. Questo confronto su un singolo campione è solo un assaggio: il cuore dell'analisi è la simulazione Monte Carlo nella sezione successiva.
+
 ```{r}
 # Funzione per stimare i modelli
 estimate_models <- function(data) {
     model1 <- lm(y ~ x1, data = data)
     model2 <- lm(y ~ x1 + x2, data = data)
-    c(beta1_model1 = unname(coef(model1)["x1"]), beta1_model2 = unname(coef(model2)["x1"]))
+    c(beta1_omitted = unname(coef(model1)["x1"]), beta1_full = unname(coef(model2)["x1"]))
 }
 # Stima dei modelli per entrambi gli scenari
 results1 <- estimate_models(data1)
@@ -89,26 +108,38 @@ results1
 results2
 ```
 
-Per entrambi gli scenari, il modello completo (con $x_1$ e $x_2$) stima $\hat{\beta}_1 \approx 1$, ovvero il valore vero. Il modello omesso (con solo $x_1$) produce invece una stima distorta nello **Scenario 1** (dove $x_1$ e $x_2$ sono correlati), mentre nello **Scenario 2** (variabili indipendenti) la stima rimane circa corretta.
+Su questo singolo campione si può già osservare il fenomeno chiave: il modello completo recupera $\hat{\beta}_1 \approx 1$ in entrambi gli scenari, mentre il modello omesso produce una stima distorta nello **Scenario 1** (dove $x_1$ e $x_2$ sono correlati) e rimane circa corretta nello **Scenario 2** (variabili indipendenti). Tuttavia, un singolo campione non è sufficiente per trarre conclusioni generali, poiché il risultato potrebbe essere casuale. Per questo ricorriamo alla simulazione Monte Carlo.
 
 ## Confronto delle distribuzioni Monte Carlo
+
+L'idea della **simulazione Monte Carlo** è semplice: invece di guardare un solo campione, ripetiamo l'intero esperimento $20\,000$ volte. Ad ogni iterazione:
+
+1. Generiamo un nuovo campione di $n = 1000$ osservazioni (sia per lo Scenario 1 che per lo Scenario 2).
+2. Stimiamo i due modelli (omesso e completo) su ciascun campione.
+3. Salviamo la stima $\hat{\beta}_1$ ottenuta da ciascun modello.
+
+Al termine, per ognuno dei quattro casi (2 scenari $\times$ 2 modelli), abbiamo un vettore di $20\,000$ stime. La **distribuzione empirica** di questi vettori ci dice:
+
+- **Dove è centrato lo stimatore**: se la media è vicina al valore vero $\beta_1 = 1$, lo stimatore è non distorto (*unbiased*).
+- **Quanto è disperso**: la varianza della distribuzione riflette l'incertezza campionaria dello stimatore.
+
 ```{r, fig.height=8, fig.width=9}
 # Simulazione Monte Carlo
 n_sim <- 20000
-beta1_model1_scenario1 <- numeric(n_sim)
-beta1_model2_scenario1 <- numeric(n_sim)
-beta1_model1_scenario2 <- numeric(n_sim)
-beta1_model2_scenario2 <- numeric(n_sim)
+beta1_omitted_s1 <- numeric(n_sim)
+beta1_full_s1    <- numeric(n_sim)
+beta1_omitted_s2 <- numeric(n_sim)
+beta1_full_s2    <- numeric(n_sim)
 
 for (i in 1:n_sim) {
     data1 <- generate_data(sigma1)
     data2 <- generate_data(sigma2)
     results1 <- estimate_models(data1)
     results2 <- estimate_models(data2)
-    beta1_model1_scenario1[i] <- results1["beta1_model1"]
-    beta1_model2_scenario1[i] <- results1["beta1_model2"]
-    beta1_model1_scenario2[i] <- results2["beta1_model1"]
-    beta1_model2_scenario2[i] <- results2["beta1_model2"]
+    beta1_omitted_s1[i] <- results1["beta1_omitted"]
+    beta1_full_s1[i]    <- results1["beta1_full"]
+    beta1_omitted_s2[i] <- results2["beta1_omitted"]
+    beta1_full_s2[i]    <- results2["beta1_full"]
 }
 
 # Palette colori in stile laboratorio
@@ -122,55 +153,55 @@ col_true      <- "#593380"   # viola           - linea valore vero
 par(mfrow = c(2, 2), mar = c(4, 4, 3, 1))
 
 # --- Scenario 1: Modello con variabile omessa ---
-hist(beta1_model1_scenario1,
+hist(beta1_omitted_s1,
      probability = TRUE,
      main = "Scenario 1: Omitted Variable",
      xlab = expression(hat(beta)[1]),
      col = col_fill_omit,
      border = "white",
      breaks = 30,
-     xlim = c(min(beta1_model1_scenario1), max(beta_1 + 0.2, max(beta1_model1_scenario1))))
-lines(density(beta1_model1_scenario1), col = col_dens_omit, lwd = 2.5)
+     xlim = c(min(beta1_omitted_s1), max(beta_1 + 0.2, max(beta1_omitted_s1))))
+lines(density(beta1_omitted_s1), col = col_dens_omit, lwd = 2.5)
 abline(v = beta_1, col = col_true, lwd = 2, lty = 2)
-abline(v = mean(beta1_model1_scenario1), col = col_dens_omit, lwd = 2, lty = 1)
+abline(v = mean(beta1_omitted_s1), col = col_dens_omit, lwd = 2, lty = 1)
 legend("topright", legend = c("Densità", expression(beta[1] == 1), expression(E(hat(beta)[1]))),
        col = c(col_dens_omit, col_true, col_dens_omit), lty = c(1, 2, 1), lwd = 2, bty = "n", cex = 0.8)
 
 # --- Scenario 1: Modello completo ---
-hist(beta1_model2_scenario1,
+hist(beta1_full_s1,
      probability = TRUE,
      main = "Scenario 1: Full Model",
      xlab = expression(hat(beta)[1]),
      col = col_fill_full,
      border = "white",
      breaks = 30)
-lines(density(beta1_model2_scenario1), col = col_dens_full, lwd = 2.5)
+lines(density(beta1_full_s1), col = col_dens_full, lwd = 2.5)
 abline(v = beta_1, col = col_true, lwd = 2, lty = 2)
 legend("topright", legend = c("Densità", expression(beta[1] == 1)),
        col = c(col_dens_full, col_true), lty = c(1, 2), lwd = 2, bty = "n", cex = 0.8)
 
 # --- Scenario 2: Modello con variabile omessa ---
-hist(beta1_model1_scenario2,
+hist(beta1_omitted_s2,
      probability = TRUE,
      main = "Scenario 2: Omitted Variable",
      xlab = expression(hat(beta)[1]),
      col = col_fill_omit,
      border = "white",
      breaks = 30)
-lines(density(beta1_model1_scenario2), col = col_dens_omit, lwd = 2.5)
+lines(density(beta1_omitted_s2), col = col_dens_omit, lwd = 2.5)
 abline(v = beta_1, col = col_true, lwd = 2, lty = 2)
 legend("topright", legend = c("Densità", expression(beta[1] == 1)),
        col = c(col_dens_omit, col_true), lty = c(1, 2), lwd = 2, bty = "n", cex = 0.8)
 
 # --- Scenario 2: Modello completo ---
-hist(beta1_model2_scenario2,
+hist(beta1_full_s2,
      probability = TRUE,
      main = "Scenario 2: Full Model",
      xlab = expression(hat(beta)[1]),
      col = col_fill_full,
      border = "white",
      breaks = 30)
-lines(density(beta1_model2_scenario2), col = col_dens_full, lwd = 2.5)
+lines(density(beta1_full_s2), col = col_dens_full, lwd = 2.5)
 abline(v = beta_1, col = col_true, lwd = 2, lty = 2)
 legend("topright", legend = c("Densità", expression(beta[1] == 1)),
        col = c(col_dens_full, col_true), lty = c(1, 2), lwd = 2, bty = "n", cex = 0.8)
