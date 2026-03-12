@@ -62,31 +62,37 @@ Confrontare le distribuzioni Monte Carlo per i due scenari.
 
 ## Obiettivo
 
-**Omissione di una variabile rilevante**: si stima un modello di regressione lineare escludendo un predittore che, nel processo generatore dei dati reale, ha un effetto non nullo sulla variabile dipendente.
+In questo notebook costruiamo un esperimento di **Monte Carlo** — per vedere con i nostri occhi cosa succede quando si esclude dal modello una variabile rilevante.
 
-Questo notebook costruisce un **esperimento di Monte Carlo** per studiare le conseguenze di questa omissione sullo stimatore OLS di $\beta_1$. In particolare, vogliamo rispondere a due domande:
+Il modello "vero" che genera i dati (chiamato DGP, *Data Generating Process*) è:
+$$y_i = \beta_0 + \beta_1 x_{1i} + \beta_2 x_{2i} + u_i$$
+dove $y_i$ è la variabile da spiegare, $x_1$ e $x_2$ sono i due predittori, $\beta_1 = 1$ e $\beta_2 = -2$ sono i loro effetti reali, e $u_i$ è un termine di errore casuale. Il nostro obiettivo è stimare $\beta_1$ con due modelli diversi:
 
-1. **Quando l'omissione distorce le stime?** La risposta dipende dalla correlazione tra la variabile omessa e i regressori inclusi nel modello.
-2. **Di quanto?** La direzione e l'entità del bias dipendono sia dalla correlazione tra le covariate sia dall'effetto della variabile omessa sulla risposta.
+- un modello che include **solo $x_1$** (il modello "sbagliato", che omette $x_2$),
+- un modello che include **entrambe** $x_1$ e $x_2$ (il modello corretto).
 
-Per isolare questi due effetti, confrontiamo due scenari:
+Per capire quando l'omissione fa danni, confrontiamo due scenari che differiscono solo per la relazione tra le due variabili:
 
-- **Scenario 1**: $x_1$ e $x_2$ sono correlate ($\rho = 0.5$). L'omissione di $x_2$ inquina la stima di $\hat{\beta}_1$.
-- **Scenario 2**: $x_1$ e $x_2$ sono indipendenti ($\rho = 0$). L'omissione di $x_2$ non introduce distorsione.
-
-Ripetendo l'esperimento $20\,000$ volte, la distribuzione Monte Carlo di $\hat{\beta}_1$ rende visibile se lo stimatore è centrato sul valore vero $\beta_1 = 1$ oppure sistematicamente distorto.
+- **Scenario 1**: $x_1$ e $x_2$ sono **correlate** tra loro ($\rho = 0.5$): tendono a muoversi insieme, quindi ignorare $x_2$ "contamina" la stima di $\beta_1$.
+- **Scenario 2**: $x_1$ e $x_2$ sono **indipendenti** ($\rho = 0$): non c'è nessun legame tra loro, quindi escludere $x_2$ non disturba la stima di $\beta_1$.
 
 ## Generazione dei dati
 
-Prima di tutto fissiaomo un seme casuale (`set.seed`) per garantire la **riproducibilità** dei risultati: chiunque esegua il codice otterrà esattamente gli stessi numeri casuali.
+Lavorare con dati simulati ha un grande vantaggio: **sappiamo già i valori veri** dei parametri, quindi possiamo controllare direttamente se le stime li recuperano. Nella realtà non conosciamo mai i valori veri — è proprio per questo che dobbiamo stimarli.
 
-Definimamo poi i **parametri veri** del DGP:
+`set.seed(123)` fissa il punto di partenza del generatore di numeri casuali di R. Questo garantisce la **riproducibilità**: chiunque esegua il codice ottiene esattamente gli stessi numeri, i risultati non cambiano da un'esecuzione all'altra.
 
-- $n = 1000$: numero di osservazioni per ogni simulazione.
-- $\beta_0 = 0$, $\beta_1 = 1$, $\beta_2 = -2$: coefficienti veri del modello. Sono i valori che vogliamo vedere se riusciamo a recuperare o meno con la stima OLS.
-- `sigma1` e `sigma2`: matrici di covarianza che determinano la struttura di dipendenza tra $x_1$ e $x_2$. Nello **Scenario 1** le due variabili sono correlate ($\rho = 0.5$), nello **Scenario 2** sono indipendenti ($\rho = 0$).
+I parametri scelti per la simulazione sono:
 
-La funzione `generate_data(sigma)` incapsula tutta la logica di generazione: campiona le covariate dalla distribuzione normale bivariata usando `mvrnorm` (pacchetto `MASS`), genera il termine di errore $u_i \sim N(0,1)$ e costruisce $y$ secondo il DGP.
+- $n = 1000$: ogni campione simulato contiene 1000 osservazioni.
+- $\beta_0 = 0$, $\beta_1 = 1$, $\beta_2 = -2$: gli effetti "veri" di ciascuna variabile. $\beta_1 = 1$ significa che aumentare $x_1$ di un'unità incrementa $y$ di 1 (a parità di $x_2$). $\beta_2 = -2$ significa che $x_2$ ha un effetto negativo su $y$: se sale $x_2$, scende $y$.
+- `sigma1` e `sigma2`: le **matrici di covarianza**, che descrivono la struttura di dipendenza tra $x_1$ e $x_2$. Una matrice di covarianza indica quale varianza ha ognuna delle due variabili e quanto sono correlate tra loro. Nello **Scenario 1** la correlazione è $\rho = 0.5$ (le due variabili sono parzialmente dipendenti), nello **Scenario 2** è $\rho = 0$ (completamente indipendenti).
+
+La funzione `generate_data(sigma)` prende come input la matrice di covarianza ed esegue tre passi:
+
+1. Campiona i valori di $x_1$ e $x_2$ dalla **distribuzione normale bivariata** — l'estensione a due dimensioni della classica "curva a campana" — con la struttura di correlazione specificata.
+2. Genera l'errore casuale $u_i \sim N(0,1)$: un rumore imprevedibile con media zero e varianza unitaria.
+3. Calcola $y$ applicando il DGP: $y = \beta_0 + \beta_1 x_1 + \beta_2 x_2 + u$.
 
 ```{r}
 set.seed(123)
@@ -110,12 +116,12 @@ data2 <- generate_data(sigma2)
 ```
 ## Stima dei modelli
 
-Qui stimiamo due modelli di regressione OLS sui dati generati, per ciascuno dei due scenari:
+Una volta generato un campione, stimiamo $\beta_1$ usando la **regressione lineare OLS** (*Ordinary Least Squares*, minimi quadrati ordinari). OLS è il metodo più comune per stimare i coefficienti di un modello lineare: trova i valori di $\beta$ che minimizzano la somma dei quadrati degli errori di previsione, cioè che fanno "aderire" il modello ai dati nel miglior modo possibile.
 
-- **Modello omesso** (`model1`): include solo $x_1$ come predittore. È il modello "sbagliato" perché ignora $x_2$, che nel DGP ha un effetto reale ($\beta_2 = -2$).
-- **Modello completo** (`model2`): include entrambi $x_1$ e $x_2$. È il modello "corretto", specificato esattamente come il DGP.
+- **Modello omesso** (`model1`): regredisce $y$ solo su $x_1$, ignorando completamente $x_2$.
+- **Modello completo** (`model2`): regredisce $y$ su $x_1$ e $x_2$, esattamente come il DGP vero.
 
-La funzione `estimate_models` restituisce la stima di $\hat{\beta}_1$ da entrambi i modelli, così possiamo confrontarle direttamente. Questo confronto su un singolo campione è solo un assaggio: il cuore dell'analisi è la simulazione Monte Carlo nella sezione successiva.
+La funzione `estimate_models` restituisce la stima di $\hat{\beta}_1$ da entrambi i modelli.
 
 ```{r}
 # Funzione per stimare i modelli
@@ -131,20 +137,26 @@ results1
 results2
 ```
 
-Su questo singolo campione si può già osservare il fenomeno chiave: il modello completo recupera $\hat{\beta}_1 \approx 1$ in entrambi gli scenari, mentre il modello omesso produce una stima distorta nello **Scenario 1** (dove $x_1$ e $x_2$ sono correlati) e rimane circa corretta nello **Scenario 2** (variabili indipendenti). Tuttavia, un singolo campione non è sufficiente per trarre conclusioni generali, poiché il risultato potrebbe essere casuale. Per questo ricorriamo alla simulazione Monte Carlo.
+Su questo singolo campione si può già intravedere il fenomeno: il modello completo recupera $\hat{\beta}_1 \approx 1$ in entrambi gli scenari (è corretto), mentre il modello omesso produce una stima distorta nello **Scenario 1** (dove $x_1$ e $x_2$ sono correlate) e rimane circa corretta nello **Scenario 2** (variabili indipendenti).
+
+Tuttavia, un singolo campione non basta per trarre conclusioni certe: il risultato che osserviamo potrebbe essere una coincidenza casuale. Per avere la certezza che quello che vediamo sia un fenomeno sistematico e ripetibile, dobbiamo ripetere l'esperimento tante volte. È esattamente quello che fa la simulazione Monte Carlo.
 
 ## Confronto delle distribuzioni Monte Carlo
 
-L'idea della **simulazione Monte Carlo** è semplice: invece di guardare un solo campione, ripetiamo l'intero esperimento $20\,000$ volte. Ad ogni iterazione:
+### Cos'è una simulazione Monte Carlo?
 
-1. Generiamo un nuovo campione di $n = 1000$ osservazioni (sia per lo Scenario 1 che per lo Scenario 2).
-2. Stimiamo i due modelli (omesso e completo) su ciascun campione.
-3. Salviamo la stima $\hat{\beta}_1$ ottenuta da ciascun modello.
+La **simulazione Monte Carlo** è una tecnica che usa la ripetizione al posto del calcolo teorico. L'idea di base è semplice: se vogliamo sapere come si comporta uno stimatore "in media", basta farlo lavorare su tantissimi campioni diversi e guardare cosa otteniamo.
 
-Al termine, per ognuno dei quattro casi (2 scenari $\times$ 2 modelli), abbiamo un vettore di $20\,000$ stime. La **distribuzione empirica** di questi vettori ci dice:
+Immagina di ripetere questo esperimento 1000 volte:
 
-- **Dove è centrato lo stimatore**: se la media è vicina al valore vero $\beta_1 = 1$, lo stimatore è non distorto (*unbiased*).
-- **Quanto è disperso**: la varianza della distribuzione riflette l'incertezza campionaria dello stimatore.
+1. Generiamo un nuovo campione da 1000 osservazioni (sia per lo Scenario 1 che per lo Scenario 2).
+2. Stimiamo il modello omesso e il modello completo su ciascun campione.
+3. Salviamo la stima $\hat{\beta}_1$ da entrambi i modelli.
+
+Alla fine, per ognuno dei quattro casi (2 scenari $\times$ 2 modelli) abbiamo 1000 stime. La loro **distribuzione empirica** (l'istogramma di tutti questi valori) risponde direttamente alle domande:
+
+- **Lo stimatore è distorto?** Se la media delle stime è diversa dal valore vero $\beta_1 = 1$, lo stimatore è **biased** (distorto). La distanza sistematica dal valore vero si chiama **bias** (o distorsione).
+- **Quanto è preciso?** Quanto sono "sparse" le stime attorno alla loro media? Più è dispersa la distribuzione, meno preciso è lo stimatore.
 
 ```{r, fig.height=8, fig.width=9}
 # Simulazione Monte Carlo
@@ -179,7 +191,25 @@ c(beta1_omitted_s1 = round(mean(beta1_omitted_s1), 3),
     beta1_omitted_s2 = round(mean(beta1_omitted_s2), 3),
     beta1_full_s2 = round(mean(beta1_full_s2), 3),
     beta_1 = beta_1)
+```
 
+### Convergenza delle medie Monte Carlo
+
+Prima di interpretare i risultati finali, è buona pratica verificare che la simulazione sia abbastanza lunga da produrre risultati **stabili**. I grafici di convergenza mostrano come evolve la media delle stime $\hat{\beta}_1$ all'aumentare del numero di iterazioni.
+
+I due grafici mostrano questa convergenza separatamente per il **modello omesso** (in alto) e il **modello completo** (in basso). In entrambi:
+
+- la **linea continua** = Scenario 1 ($\rho = 0.5$, variabili correlate),
+- la **linea tratteggiata** = Scenario 2 ($\rho = 0$, variabili indipendenti),
+- la **linea viola** = valore vero $\beta_1 = 1$ (il bersaglio).
+
+Nel **modello omesso** (grafico in alto) si vede che la curva dello Scenario 1 si stabilizza intorno a 0, non a 1. Questo non è un errore casuale che scompare con più dati: è il **bias sistematico**. L'errore è strutturale — viene dal fatto che il modello è mal specificato. La formula esatta prevede:
+$$\text{Bias}(\hat{\beta}_1) = \beta_2 \cdot \frac{\text{Cov}(x_1, x_2)}{\text{Var}(x_1)} = -2 \cdot 0.5 = -1$$
+Il termine $\frac{\text{Cov}(x_1,x_2)}{\text{Var}(x_1)}$ misura quanto $x_2$ varia "insieme" a $x_1$: maggiore è la correlazione, maggiore è il bias. Poiché $\beta_2 = -2$, il modello omesso sottostima sistematicamente $\beta_1$, ottenendo $E[\hat{\beta}_1] = 1 + (-1) = 0$. La curva dello Scenario 2 invece converge correttamente a 1: senza correlazione tra le variabili, il meccanismo che causa il bias non scatta.
+
+Nel **modello completo** (grafico in basso) entrambe le curve convergono rapidamente verso 1, a prescindere dallo scenario. Includere tutte le variabili rilevanti garantisce stime corrette.
+
+```{r convergenza, fig.height=6, fig.width=9}
 # Convergenza delle medie Monte Carlo al crescere delle iterazioni
 iters          <- seq_len(n_sim)
 cum_omitted_s1 <- cumsum(beta1_omitted_s1) / iters
@@ -218,7 +248,22 @@ legend("topright",
        legend = c("Scenario 1", "Scenario 2", expression(beta[1] == 1)),
        col = c(col_dens_full, col_dens_full, col_true),
        lty = c(1, 2, 2), lwd = 2, bty = "n", cex = 0.8)
+```
 
+### Distribuzioni degli stimatori
+
+Una volta verificata la convergenza, possiamo analizzare la **forma completa** delle distribuzioni Monte Carlo. I quattro istogrammi organizzano le `r n_sim` stime $\hat{\beta}_1$ per scenario (righe) e per tipo di modello (colonne), e ci permettono di vedere non solo dove è centrata la distribuzione, ma anche quanto è ampia e simmetrica.
+
+Come leggere ogni grafico:
+
+- **Le barre dell'istogramma**: ogni barra indica quante volte (su `r n_sim` simulazioni) la stima $\hat{\beta}_1$ è caduta in quell'intervallo di valori. Più alta è la barra, più spesso lo stimatore ha prodotto quel risultato.
+- **La curva sovrapposta**: è la densità di probabilità stimata, cioè una versione levigata dell'istogramma che mostra la "forma" complessiva della distribuzione.
+- **La linea viola tratteggiata**: indica il valore vero $\beta_1 = 1$ — il nostro bersaglio.
+- **La linea continua colorata**: indica la media delle `r n_sim` stime, cioè dove lo stimatore "punta" in media.
+
+Se la linea colorata e la linea viola coincidono, lo stimatore è non distorto: in media centra il bersaglio. Se sono distanti, lo stimatore è biased: manca sistematicamente il bersaglio nella stessa direzione.
+
+```{r istogrammi, fig.height=8, fig.width=9}
 # Confronto delle distribuzioni
 par(mfrow = c(2, 2), mar = c(4, 4, 3, 1))
 
@@ -284,16 +329,21 @@ legend("topright", legend = c("Densità", expression(beta[1] == 1),
     lty = c(1, 2, 1), lwd = 2, bty = "n", cex = 0.8)
 ```
 
-I quattro istogrammi mostrano la distribuzione Monte Carlo di $\hat{\beta}_1$ su `r n_sim` simulazioni. La curva sovrapposta rappresenta la densità empirica stimata, mentre la linea tratteggiata viola indica il valore vero $\beta_1 = `r beta_1`$.
+I grafici confermano esattamente quello che la teoria prevede.
 
-**Scenario 1** ($\text{Corr}(x_1, x_2) = 0.5$):
+**Scenario 1** (le due variabili sono correlate, $\rho = 0.5$):
 
-- *Modello con variabile omessa*: la distribuzione di $\hat{\beta}_1$ è centrata lontano dal valore vero. Poiché $x_2$ è correlata con $x_1$ e ha effetto negativo ($\beta_2 = -2$), l'omissione trasferisce parte dell'effetto di $x_2$ su $\hat{\beta}_1$, producendo una stima sistematicamente distorta verso il basso (**omitted variable bias**).
-- *Modello completo*: la distribuzione è centrata sul valore vero $\beta_1 = 1$, confermando la consistenza dello stimatore OLS.
+- *Modello omesso* (in alto a sinistra): la distribuzione è centrata intorno a 0, lontana dal valore vero $\beta_1 = 1$. Perché accade questo? Perché $x_2$ ha un effetto su $y$ ($\beta_2 = -2$) e allo stesso tempo è correlata con $x_1$. Quando escludiamo $x_2$ dal modello, il coefficiente di $x_1$ deve "farsi carico" anche dell'effetto di $x_2$: siccome quest'ultima ha un effetto negativo ($\beta_2 < 0$) e le due variabili sono correlate positivamente, la stima di $\beta_1$ viene trascinata verso il basso. Il bias non è casuale: è sistematico e prevedibile dalla formula teorica.
+- *Modello completo* (in alto a destra): la distribuzione è centrata su 1 — la stima è corretta. Includere $x_2$ elimina completamente il bias.
 
-**Scenario 2** ($\text{Corr}(x_1, x_2) = 0$):
+**Scenario 2** (le due variabili sono indipendenti, $\rho = 0$):
 
-- *Modello con variabile omessa*: la distribuzione rimane centrata sul valore vero. Quando le covariate sono ortogonali, l'omissione di $x_2$ non introduce bias su $\hat{\beta}_1$, pur aumentandone leggermente la varianza.
-- *Modello completo*: distribuzione analoga allo Scenario 1, centrata su $\beta_1 = 1$.
+- *Modello omesso* (in basso a sinistra): la distribuzione è centrata su 1, nonostante $x_2$ sia assente dal modello. Qui il bias non compare perché $x_1$ e $x_2$ non si "confondono" a vicenda: dal momento che non c'è correlazione tra di loro, escludere $x_2$ non disturba la stima di $\beta_1$. Si può notare però che la distribuzione è leggermente più larga rispetto al modello completo: escludere una variabile rilevante aumenta l'errore casuale del modello, rendendolo meno preciso (anche se non distorto).
+- *Modello completo* (in basso a destra): risultato quasi identico allo Scenario 1 — la distribuzione è centrata su 1 e ben concentrata.
 
-**Conclusione**: il bias da variabile omessa si manifesta **solo quando la variabile esclusa è correlata con i regressori inclusi**. In assenza di correlazione, l'omissione non distorce le stime, ma riduce l'efficienza del modello.
+**Conclusione generale**: il bias da variabile omessa non compare sempre. Compare solo se la variabile esclusa soddisfa *entrambe* le condizioni seguenti:
+
+1. Ha un **effetto reale** sulla variabile dipendente ($\beta_2 \neq 0$) — se la variabile omessa non conta, non può creare danni.
+2. È **correlata** con almeno uno dei predittori inclusi nel modello — se è indipendente, non "contamina" le altre stime.
+
+Se anche una sola delle due condizioni non è soddisfatta, l'omissione non distorce le stime. Tuttavia, escludere una variabile rilevante riduce sempre la precisione delle stime, aumentando la loro variabilità.
