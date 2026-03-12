@@ -21,6 +21,12 @@ header-includes:
   - \definecolor{darkgray}{RGB}{180,180,180}
 ---
 
+```{r setup, include=FALSE}
+if (dir.exists("img")) unlink(list.files("img", full.names = TRUE))
+dir.create("img", showWarnings = FALSE)
+knitr::opts_chunk$set(fig.path = "img/", dev = "png")
+```
+
 Impostare un esperimento di Monte Carlo per capire le conseguenze dell'omissione di una covariata rilevante.
 
 \underline{DGP}
