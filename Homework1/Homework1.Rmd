@@ -161,18 +161,57 @@ for (i in 1:n_sim) {
     beta1_full_s2[i]    <- results2["beta1_full"]
 }
 
-c(beta1_omitted_s1 = round(mean(beta1_omitted_s1), 3),
-    beta1_full_s1 = round(mean(beta1_full_s1), 3),
-    beta1_omitted_s2 = round(mean(beta1_omitted_s2), 3),
-    beta1_full_s2 = round(mean(beta1_full_s2), 3),
-    beta_1 = beta_1)
-
 # Palette colori
 col_fill_omit <- "#D3EDEC"   # azzurro chiaro  - modello con variabile omessa
 col_fill_full <- "#D3EDEC"   # stesso fill, si distinguono per titolo/densità
 col_dens_omit <- "#990F3D"   # rosso scuro     - curva densità modello omesso
 col_dens_full <- "#0D7680"   # verde-teal      - curva densità modello completo
 col_true      <- "#593380"   # viola           - linea valore vero
+
+c(beta1_omitted_s1 = round(mean(beta1_omitted_s1), 3),
+    beta1_full_s1 = round(mean(beta1_full_s1), 3),
+    beta1_omitted_s2 = round(mean(beta1_omitted_s2), 3),
+    beta1_full_s2 = round(mean(beta1_full_s2), 3),
+    beta_1 = beta_1)
+
+# Convergenza delle medie Monte Carlo al crescere delle iterazioni
+iters          <- seq_len(n_sim)
+cum_omitted_s1 <- cumsum(beta1_omitted_s1) / iters
+cum_full_s1    <- cumsum(beta1_full_s1)    / iters
+cum_omitted_s2 <- cumsum(beta1_omitted_s2) / iters
+cum_full_s2    <- cumsum(beta1_full_s2)    / iters
+
+par(mfrow = c(2, 1), mar = c(4, 4, 3, 2))
+ylim_omit <- range(cum_omitted_s1, cum_omitted_s2, beta_1)
+ylim_full <- range(cum_full_s1, cum_full_s2, beta_1)
+
+# --- Convergenza: Modello con variabile omessa ---
+plot(iters, cum_omitted_s1,
+     type = "l", col = col_dens_omit, lwd = 1.5,
+     ylim = ylim_omit,
+     xlab = "Numero di iterazioni",
+     ylab = expression(bar(hat(beta))[1]),
+     main = "Convergenza: Modello Omesso")
+lines(iters, cum_omitted_s2, col = col_dens_omit, lwd = 1.5, lty = 2)
+abline(h = beta_1, col = col_true, lwd = 2, lty = 2)
+legend("topright",
+       legend = c("Scenario 1", "Scenario 2", expression(beta[1] == 1)),
+       col = c(col_dens_omit, col_dens_omit, col_true),
+       lty = c(1, 2, 2), lwd = 2, bty = "n", cex = 0.8)
+
+# --- Convergenza: Modello completo ---
+plot(iters, cum_full_s1,
+     type = "l", col = col_dens_full, lwd = 1.5,
+     ylim = ylim_full,
+     xlab = "Numero di iterazioni",
+     ylab = expression(bar(hat(beta))[1]),
+     main = "Convergenza: Modello Completo")
+lines(iters, cum_full_s2, col = col_dens_full, lwd = 1.5, lty = 2)
+abline(h = beta_1, col = col_true, lwd = 2, lty = 2)
+legend("topright",
+       legend = c("Scenario 1", "Scenario 2", expression(beta[1] == 1)),
+       col = c(col_dens_full, col_dens_full, col_true),
+       lty = c(1, 2, 2), lwd = 2, bty = "n", cex = 0.8)
 
 # Confronto delle distribuzioni
 par(mfrow = c(2, 2), mar = c(4, 4, 3, 1))
