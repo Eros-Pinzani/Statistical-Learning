@@ -1,0 +1,261 @@
+---
+title: "Bias da Variabile Omessa"
+subtitle: "Un Esperimento Monte Carlo"
+author: "Francesco Faillace"
+output:
+  pdf_document:
+    toc: false
+    number_sections: false
+    fig_caption: true
+    highlight: tango
+    keep_tex: false
+header-includes:
+  - \usepackage{xcolor}
+  - \usepackage{fancyvrb}
+  - \usepackage{framed}
+  - \usepackage{float}
+  - \usepackage{caption}
+  - \definecolor{shadecolor}{RGB}{230,230,230}
+  - \DefineVerbatimEnvironment{Highlighting}{Verbatim}{fontsize=\small,commandchars=\\\{\}}
+  - \RecustomVerbatimEnvironment{verbatim}{Verbatim}{fontsize=\footnotesize,frame=single,framesep=3mm,rulecolor=\color{darkgray}}
+  - \definecolor{darkgray}{RGB}{180,180,180}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+## Introduzione
+
+In questo elaborato analizziamo le conseguenze statistiche dell'esclusione di una variabile esplicativa rilevante da un modello di regressione lineare, mediante simulazione Monte Carlo.
+
+Il processo generatore dei dati (DGP) è il seguente:
+
+$$y_i = \beta_0 + \beta_1 x_{1i} + \beta_2 x_{2i} + u_i, \quad u_i \sim N(0,1)$$
+
+dove i regressori sono estratti da una distribuzione normale bivariata:
+
+$$\begin{pmatrix} x_1 \\ x_2 \end{pmatrix} \sim N_2\!\left(\mathbf{0},\, \Sigma\right)$$
+
+Vengono considerati due scenari distinti, che differiscono unicamente per la struttura di correlazione tra $x_1$ e $x_2$:
+
+- **Scenario A** — variabili correlate: $\quad\Sigma = \begin{bmatrix}1 & 0.5 \\ 0.5 & 1\end{bmatrix}$
+
+- **Scenario B** — variabili indipendenti: $\quad\Sigma = \begin{bmatrix}1 & 0 \\ 0 & 1\end{bmatrix}$
+
+Per ciascun scenario, ad ogni iterazione si stimano due versioni del modello: una che include entrambi i predittori ($x_1$ e $x_2$) e una che omette $x_2$, salvando in entrambi i casi la stima $\hat{\beta}_1$.
+
+---
+
+## Setup e generazione dei dati
+
+Fissiamo il seme per garantire la riproducibilità dei risultati e definiamo i parametri della simulazione. La scelta $\beta_2 = -2$ con correlazione positiva $\rho = 0.5$ nello Scenario A produrrà un bias negativo ben visibile, come vedremo.
+
+```{r parametri}
+set.seed(42)
+
+# Dimensione campionaria e numero di repliche Monte Carlo
+n     <- 1000
+n_sim <- 1000
+
+# Valori veri dei parametri
+b0 <- 0
+b1 <- 1
+b2 <- -2
+
+# Matrici di covarianza
+Sigma_A <- matrix(c(1, 0.5, 0.5, 1), nrow = 2)   # correlazione rho = 0.5
+Sigma_B <- matrix(c(1, 0.0, 0.0, 1), nrow = 2)   # indipendenza  rho = 0
+
+library(MASS)
+
+# Funzione che genera un data.frame (y, x1, x2) dato Sigma
+genera_campione <- function(Sigma) {
+  X <- mvrnorm(n, mu = c(0, 0), Sigma = Sigma)
+  u <- rnorm(n, mean = 0, sd = 1)
+  y <- b0 + b1 * X[, 1] + b2 * X[, 2] + u
+  data.frame(y = y, x1 = X[, 1], x2 = X[, 2])
+}
+```
+
+---
+
+## Stima OLS: modello omesso vs modello corretto
+
+La funzione `stima_beta1` esegue due regressioni OLS sullo stesso campione e restituisce la stima di $\beta_1$ in entrambi i casi:
+
+- **modello ridotto**: $y \sim x_1$ — ignora $x_2$
+- **modello completo**: $y \sim x_1 + x_2$ — specifica correttamente il DGP
+
+```{r stima}
+stima_beta1 <- function(dati) {
+  mod_ridotto  <- lm(y ~ x1,      data = dati)
+  mod_completo <- lm(y ~ x1 + x2, data = dati)
+  c(
+    ridotto  = unname(coef(mod_ridotto)["x1"]),
+    completo = unname(coef(mod_completo)["x1"])
+  )
+}
+
+# Verifica su un singolo campione
+cat("--- Singolo campione: Scenario A ---\n")
+stima_beta1(genera_campione(Sigma_A))
+
+cat("\n--- Singolo campione: Scenario B ---\n")
+stima_beta1(genera_campione(Sigma_B))
+```
+
+Già su un campione singolo si intravede il fenomeno: nello Scenario A il modello ridotto fornisce una stima di $\hat{\beta}_1$ molto distante da 1, mentre nello Scenario B rimane vicina al valore vero. Tuttavia, un'unica replica non è sufficiente a trarre conclusioni robuste: potrebbe trattarsi di fluttuazione casuale. La simulazione Monte Carlo risolve questo limite.
+
+---
+
+## Simulazione Monte Carlo
+
+Ripetiamo l'esperimento `r n_sim` volte, raccogliendo in quattro vettori le stime $\hat{\beta}_1$ per ogni combinazione scenario–modello.
+
+```{r montecarlo}
+# Contenitori per le stime
+rid_A  <- numeric(n_sim)
+comp_A <- numeric(n_sim)
+rid_B  <- numeric(n_sim)
+comp_B <- numeric(n_sim)
+
+for (i in seq_len(n_sim)) {
+  sA <- stima_beta1(genera_campione(Sigma_A))
+  sB <- stima_beta1(genera_campione(Sigma_B))
+  rid_A[i]  <- sA["ridotto"]
+  comp_A[i] <- sA["completo"]
+  rid_B[i]  <- sB["ridotto"]
+  comp_B[i] <- sB["completo"]
+}
+
+# Medie Monte Carlo
+round(c(
+  "E[b1] rid. A"  = mean(rid_A),
+  "E[b1] comp. A" = mean(comp_A),
+  "E[b1] rid. B"  = mean(rid_B),
+  "E[b1] comp. B" = mean(comp_B),
+  "Valore vero"   = b1
+), 3)
+```
+
+I risultati numerici anticipano già le conclusioni: il modello ridotto nello Scenario A converge verso 0 anziché verso 1, coerentemente con il bias teorico atteso:
+
+$$\text{Bias}(\hat{\beta}_1) = \beta_2 \cdot \frac{\text{Cov}(x_1, x_2)}{\text{Var}(x_1)} = -2 \cdot \frac{0.5}{1} = -1$$
+
+---
+
+## Grafici di convergenza
+
+Prima di analizzare le distribuzioni finali, verifichiamo la stabilità delle medie Monte Carlo al crescere del numero di repliche. Se la simulazione è ben calibrata, le medie cumulate devono smettere di oscillare e assestarsi su valori stabili ben prima dell'ultima iterazione.
+
+```{r convergenza, fig.height=6, fig.width=9}
+# Colori
+c_rid  <- "#C0392B"   # rosso  — modello ridotto
+c_comp <- "#1A6E74"   # teal   — modello completo
+c_vero <- "#6C3483"   # viola  — valore vero
+
+iterazioni <- seq_len(n_sim)
+
+# Medie cumulate
+cum_rid_A  <- cumsum(rid_A)  / iterazioni
+cum_comp_A <- cumsum(comp_A) / iterazioni
+cum_rid_B  <- cumsum(rid_B)  / iterazioni
+cum_comp_B <- cumsum(comp_B) / iterazioni
+
+par(mfrow = c(1, 2), mar = c(4, 4, 3, 2))
+
+# --- Scenario A ---
+ylim_A <- range(cum_rid_A, cum_comp_A, b1)
+plot(iterazioni, cum_rid_A,
+     type = "l", col = c_rid, lwd = 1.8,
+     ylim = ylim_A,
+     xlab = "Iterazioni", ylab = expression(bar(hat(beta))[1]),
+     main = "Scenario A  (rho = 0.5)")
+lines(iterazioni, cum_comp_A, col = c_comp, lwd = 1.8)
+abline(h = b1, col = c_vero, lwd = 2, lty = 2)
+legend("right",
+       legend = c("Modello ridotto", "Modello completo",
+                  expression(beta[1] == 1)),
+       col = c(c_rid, c_comp, c_vero),
+       lty = c(1, 1, 2), lwd = 2, bty = "n", cex = 0.85)
+
+# --- Scenario B ---
+ylim_B <- range(cum_rid_B, cum_comp_B, b1)
+plot(iterazioni, cum_rid_B,
+     type = "l", col = c_rid, lwd = 1.8,
+     ylim = ylim_B,
+     xlab = "Iterazioni", ylab = expression(bar(hat(beta))[1]),
+     main = "Scenario B  (rho = 0)")
+lines(iterazioni, cum_comp_B, col = c_comp, lwd = 1.8)
+abline(h = b1, col = c_vero, lwd = 2, lty = 2)
+legend("right",
+       legend = c("Modello ridotto", "Modello completo",
+                  expression(beta[1] == 1)),
+       col = c(c_rid, c_comp, c_vero),
+       lty = c(1, 1, 2), lwd = 2, bty = "n", cex = 0.85)
+```
+
+Il grafico di sinistra mostra con chiarezza il bias dello Scenario A: la curva rossa (modello ridotto) si stabilizza intorno a 0, mentre quella teal (modello completo) converge a 1. Nel grafico di destra entrambe le curve si sovrappongono e convergono al valore vero, a conferma che senza correlazione tra i regressori il bias non si manifesta.
+
+---
+
+## Distribuzioni Monte Carlo
+
+I quattro istogrammi seguenti mostrano la distribuzione empirica di $\hat{\beta}_1$ per ogni combinazione scenario–modello. La linea viola tratteggiata indica il valore vero $\beta_1 = 1$; la linea continua colorata indica la media delle `r n_sim` stime.
+
+```{r distribuzioni, fig.height=8, fig.width=9}
+c_fill <- "#E8F4F8"
+
+par(mfrow = c(2, 2), mar = c(4, 4, 3.5, 1))
+
+# helper per tracciare un pannello
+pannello <- function(valori, titolo, colore_dens) {
+  hist(valori,
+       probability = TRUE,
+       main   = titolo,
+       xlab   = expression(hat(beta)[1]),
+       col    = c_fill,
+       border = "white",
+       breaks = 30)
+  lines(density(valori), col = colore_dens, lwd = 2.5)
+  abline(v = b1,           col = c_vero,       lwd = 2,   lty = 2)
+  abline(v = mean(valori), col = colore_dens,  lwd = 2,   lty = 1)
+  legend("topright",
+         legend = c("Densità stimata",
+                    expression(beta[1] == 1),
+                    expression(E(hat(beta)[1]))),
+         col = c(colore_dens, c_vero, colore_dens),
+         lty = c(1, 2, 1), lwd = 2, bty = "n", cex = 0.8)
+}
+
+pannello(rid_A,  "Scenario A — Modello ridotto",   c_rid)
+pannello(comp_A, "Scenario A — Modello completo",  c_comp)
+pannello(rid_B,  "Scenario B — Modello ridotto",   c_rid)
+pannello(comp_B, "Scenario B — Modello completo",  c_comp)
+```
+
+---
+
+## Interpretazione dei risultati
+
+**Scenario A** ($\rho = 0.5$ — variabili correlate):
+
+- *Modello ridotto*: la distribuzione è centrata su circa 0, con uno scarto di $-1$ rispetto al valore vero. L'effetto negativo di $x_2$ su $y$ viene erroneamente attribuito a $x_1$, trascinandone la stima verso il basso. Il bias è determinístico e prevedibile.
+- *Modello completo*: la distribuzione è centrata su 1. Specificare correttamente il modello annulla il bias.
+
+**Scenario B** ($\rho = 0$ — variabili indipendenti):
+
+- *Modello ridotto*: la distribuzione rimane centrata su 1. L'assenza di correlazione tra $x_1$ e $x_2$ impedisce al meccanismo del bias di attivarsi. Si osserva però una dispersione leggermente maggiore rispetto al modello completo: omettere una variabile rilevante aumenta la varianza dello stimatore.
+- *Modello completo*: distribuzione centrata su 1 e più concentrata rispetto al modello ridotto.
+
+---
+
+## Conclusioni
+
+L'esperimento Monte Carlo permette di verificare empiricamente un risultato ben noto in econometria. Il bias da variabile omessa si manifesta **esclusivamente** quando sono soddisfatte entrambe le condizioni seguenti:
+
+1. La variabile esclusa esercita un effetto causale sulla variabile dipendente ($\beta_2 \neq 0$).
+2. La variabile esclusa è correlata con almeno uno dei regressori inclusi nel modello ($\text{Cov}(x_1, x_2) \neq 0$).
+
+Se una sola di queste condizioni viene meno, le stime restano non distorte. Tuttavia, escludere una variabile rilevante aumenta sempre la varianza delle stime — un costo in termini di precisione che persiste anche in assenza di bias.
