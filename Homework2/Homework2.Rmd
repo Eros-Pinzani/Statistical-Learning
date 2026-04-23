@@ -1,330 +1,671 @@
 ---
-title: "Kernel Density Estimation — Effetto della Bandwidth"
-author: ""
-date: "`r Sys.Date()`"
+title: "Kernel Density Estimation"
+subtitle: "Codice annotato per la presentazione — tre slide"
+date: "`r format(Sys.Date(), '%d %B %Y')`"
 output:
   pdf_document:
     toc: true
+    toc_depth: 2
     number_sections: true
-    highlight: tango
+    latex_engine: xelatex
+    fig_width: 8
+    fig_height: 4.5
+header-includes:
+  - \usepackage{amsmath}
+  - \usepackage{amssymb}
+  - \usepackage{booktabs}
+  - \usepackage{float}
+  - \floatplacement{figure}{H}
+  - \renewcommand{\contentsname}{Indice}
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(
   echo    = TRUE,
-  message = FALSE,
   warning = FALSE,
-  fig.align = "center",
-  fig.width  = 6.5,
-  fig.height = 4
+  message = FALSE,
+  out.width = "100%"
 )
-```
-
-```{r librerie}
 library(ggplot2)
 library(patchwork)
+
+# `kableExtra` is optional: render continues with plain `knitr::kable` if missing.
+has_kable_extra <- requireNamespace("kableExtra", quietly = TRUE)
 ```
 
----
+\newpage
 
-# Introduzione
+# Introduzione teorica
 
-La **Kernel Density Estimation (KDE)** è un metodo non parametrico per stimare
-la densità di probabilità di una variabile aleatoria a partire da un campione
-osservato, senza assumere nessuna forma funzionale (es. normalità).
+## Cos'è la KDE
 
-Dato un campione $x_1, \ldots, x_n$, la KDE è definita come:
+La **Kernel Density Estimation (KDE)** è un metodo non parametrico per stimare la densità di
+probabilità $f(x)$ di una variabile aleatoria continua, a partire da un campione osservato
+$x_1, \ldots, x_n$.  
+A differenza dell'istogramma, non dipende dalla scelta dei bin e produce una curva
+continua e differenziabile.
+
+**Definizione.** Data una funzione kernel $K(\cdot)$ e una bandwidth $h > 0$:
 
 $$\hat{f}(x) = \frac{1}{nh} \sum_{i=1}^{n} K\!\left(\frac{x - x_i}{h}\right)$$
 
-dove:
+Il kernel $K$ deve soddisfare:
+$K(u) \ge 0$, $K(u) = K(-u)$ (simmetria), $\int K(u)\,du = 1$ (normalizzazione).
 
-- $K(\cdot)$ è il **kernel**, una funzione simmetrica e non negativa con integrale 1
-  (in questo notebook usiamo il kernel gaussiano)
-- $h > 0$ è la **bandwidth**, il parametro che controlla quanto è "liscia" la stima
+In questo notebook usiamo il **kernel gaussiano**:
 
-L'obiettivo di questo notebook è mostrare empiricamente come la scelta di $h$
-influenzi la qualità della stima, usando una distribuzione volutamente
-"difficile": una **mistura bimodale**.
+$$K(u) = \frac{1}{\sqrt{2\pi}}\,e^{-u^2/2}$$
 
----
+Ogni osservazione $x_i$ contribuisce alla stima con una "campana" gaussiana centrata in $x_i$
+e di ampiezza $h$; la stima finale è la loro media.
 
-# Setup: la distribuzione vera e il campione
+## Il ruolo della bandwidth $h$
 
-## La mistura bimodale
+Il parametro $h$ determina la *larghezza* di ogni campana e quindi il grado di lisciamento:
 
-Usiamo come distribuzione generatrice una mistura di due gaussiane:
+- $h$ **piccolo** $\Rightarrow$ ogni osservazione forma un picco distinto; la stima insegue il
+  rumore campionario (**overfitting** / undersmoothing).
+- $h$ **grande** $\Rightarrow$ i picchi si fondono; la stima non coglie la struttura vera
+  (**underfitting** / oversmoothing).
 
-$$f(x) = 0.4 \cdot \mathcal{N}(-2,\, 1) + 0.6 \cdot \mathcal{N}(3,\, 0.5)$$
+Il tradeoff si formalizza scomponendo il **MISE** (Mean Integrated Squared Error):
 
-Questa distribuzione è un caso difficile per la KDE perché ha **due picchi ben
-separati** e **varianze diverse**. Una bandwidth unica non può adattarsi
-perfettamente a entrambi.
+$$\text{MISE}(\hat{f}) = \mathbb{E}\!\left[\int\!\bigl(\hat{f}(x)-f(x)\bigr)^2 dx\right]
+ = \underbrace{\int \text{Bias}^2\!\left[\hat{f}(x)\right]dx}_{\uparrow \text{ con } h}
+ + \underbrace{\int \text{Var}\!\left[\hat{f}(x)\right]dx}_{\downarrow \text{ con } h}$$
 
-```{r setup-dati}
+Poiché nella pratica $f$ è sconosciuta, il MISE non è calcolabile direttamente.
+In questo notebook, essendo in contesto simulato, lo stimiamo empiricamente tramite
+**media Monte Carlo** su $B$ campioni indipendenti — si veda la Sezione 3.
+
+Il valore ottimale teorico scala come $h^* \propto n^{-1/5}$, che bilancia i due termini.
+
+## Distribuzione generatrice usata nel notebook
+
+Usiamo una **mistura bimodale**, volutamente difficile per la KDE a bandwidth fissa:
+
+$$f(x) = 0.4\cdot\mathcal{N}(-2,\,1^2) + 0.6\cdot\mathcal{N}(3,\,0.5^2)$$
+
+I due picchi hanno varianze molto diverse (1 vs 0.25): una bandwidth unica non può adattarsi
+perfettamente a entrambi, rendendo il caso ideale per illustrare i limiti della KDE standard.
+
+## Metodi automatici per la scelta di $h$
+
+Nella pratica la vera $f$ è sconosciuta, quindi $h^*$ non è calcolabile direttamente.
+Esistono diversi stimatori automatici:
+
+| Metodo | Idea | Funzione R |
+|--------|------|------------|
+| **$h^*$ (MISE empirico)** | Minimo della curva $\widehat{\text{MISE}}(h)$ stimata su $B$ campioni Monte Carlo — **riferimento ottimale, disponibile solo in contesto simulato** | — |
+| **Silverman** | $1.06\,\hat{\sigma}\,n^{-1/5}$ — ottimale se i dati sono gaussiani | `bw.nrd0()` |
+| **Scott** | $1.059\,\hat{\sigma}\,n^{-1/5}$ — variante di Silverman | `bw.nrd()` |
+| **Sheather–Jones** | Plug-in adattivo; robusto su distribuzioni non gaussiane | `bw.SJ()` |
+| **UCV** | Unbiased Cross-Validation; minimizza una stima non distorta del MISE | `bw.ucv()` |
+| **BCV** | Biased Cross-Validation; variante con minore variabilità | `bw.bcv()` |
+
+Poiché in questo notebook lavoriamo in contesto simulato e conosciamo la vera $f$,
+possiamo calcolare $h^*$ esattamente (come argmin della curva $\widehat{\text{MISE}}(h)$)
+e usarlo come **benchmark** per valutare quanto ogni selettore automatico si avvicini
+all'ottimo. Silverman e Scott tendono a *sovrastimare* $h$ su distribuzioni multimodali,
+perché $\hat{\sigma}$ è gonfiata dalla distanza tra i picchi.
+
+\newpage
+
+# Setup comune
+
+Questo blocco definisce le funzioni e i parametri condivisi da tutti i grafici successivi.
+Deve essere eseguito **per primo**.
+
+```{r setup-comune}
 set.seed(42)
 
-# Vera densità
+# ── Vera densità (ground truth) ──────────────────────────────────────────────
 true_density <- function(x) {
   0.4 * dnorm(x, mean = -2, sd = 1) +
   0.6 * dnorm(x, mean =  3, sd = 0.5)
 }
 
-# Campionamento dalla mistura
+# ── Campionamento dalla mistura ───────────────────────────────────────────────
 sample_mixture <- function(n) {
-  comp <- sample(c(1, 2), size = n, replace = TRUE, prob = c(0.4, 0.6))
-  ifelse(comp == 1, rnorm(n, -2, 1), rnorm(n, 3, 0.5))
+  comp <- sample(c(1L, 2L), size = n, replace = TRUE, prob = c(0.4, 0.6))
+  ifelse(comp == 1L, rnorm(n, -2, 1), rnorm(n, 3, 0.5))
 }
 
-# KDE con kernel gaussiano — implementazione manuale
+# ── KDE con kernel gaussiano — implementazione manuale ────────────────────────
+#   x_grid : vettore di punti in cui valutare la stima
+#   data   : campione osservato
+#   h      : bandwidth
 kde_manual <- function(x_grid, data, h) {
   sapply(x_grid, function(x) mean(dnorm((x - data) / h)) / h)
 }
 
-# Parametri globali
-n      <- 300
-data   <- sample_mixture(n)
-x_grid <- seq(-6, 6.5, length.out = 600)
-```
+# ── Parametri globali ─────────────────────────────────────────────────────────
+n      <- 500
+data   <- sample_mixture(n)            # campione fisso per tutta l'analisi
+x_grid <- seq(-6, 6, length.out = 1000)   # griglia più compatta (velocità)
+dx     <- diff(x_grid)[1]             # passo della griglia (usato per integrare)
 
-## Visualizzazione del campione e della vera densità
-
-```{r plot-vera-densita, fig.height=3.5}
 df_true <- data.frame(x = x_grid, y = true_density(x_grid))
-
-ggplot() +
-  geom_rug(aes(x = data), alpha = 0.4, color = "#2c3e50") +
-  geom_line(data = df_true, aes(x = x, y = y),
-            color = "#2c3e50", linewidth = 1.1) +
-  labs(
-    title    = "Vera densità e campione osservato",
-    subtitle = paste0("f(x) = 0.4·N(-2,1) + 0.6·N(3,0.5)  |  n = ", n),
-    x = "x", y = "Densità"
-  ) +
-  theme_minimal(base_size = 13) +
-  theme(plot.title = element_text(face = "bold"),
-        panel.grid.minor = element_blank())
 ```
 
-Il `geom_rug` sul fondo mostra la posizione delle singole osservazioni.
-Si vede chiaramente la struttura bimodale: un addensamento intorno a $-2$
-e uno più stretto intorno a $3$.
+\newpage
 
----
+# Slide 1 — Bias, Varianza e curva MISE
 
-# Effetto della bandwidth: panoramica
+## Obiettivo
 
-## La regola di Silverman come riferimento
+La prima slide è **teorica**: mostra visivamente perché esiste un $h$ ottimale, disegnando
+le tre curve — $\text{Bias}^2(h)$, $\text{Varianza}(h)$ e $\text{MISE}(h)$ — come funzione
+di $h$, stimate empiricamente tramite simulazione Monte Carlo.
 
-Prima di variare $h$ manualmente, calcoliamo la bandwidth suggerita dalla
-**regola di Silverman**, che è il default di R (`bw.nrd0`):
+## Come si calcola il MISE empiricamente
 
-$$h_{\text{Silverman}} = 1.06 \cdot \hat{\sigma} \cdot n^{-1/5}$$
+Il MISE è il **valore atteso dell'ISE** rispetto a tutti i possibili campioni di taglia $n$:
 
-Questa formula è ottimale se i dati sono gaussiani. Su distribuzioni multimodali
-tende a **sovrastimare** $h$ perché $\hat{\sigma}$ è gonfiata dalla distanza
-tra i due picchi.
+$$\text{MISE}(h) = \mathbb{E}\!\left[\text{ISE}(h)\right]
+                = \mathbb{E}\!\left[\int\!\bigl(\hat{f}(x)-f(x)\bigr)^2 dx\right]$$
 
-```{r silverman}
-h_silverman <- bw.nrd0(data)
-cat("h di Silverman:", round(h_silverman, 4))
-```
+Poiché conosciamo la vera $f$ (siamo in contesto simulato), possiamo stimarlo con la
+media campionaria su $B$ simulazioni indipendenti:
 
-## Confronto tra cinque valori di h
+$$\widehat{\text{MISE}}(h) = \frac{1}{B}\sum_{b=1}^{B} \text{ISE}_b(h),
+\quad \text{ISE}_b(h) = \int\!\bigl[\hat{f}_b(x)-f(x)\bigr]^2 dx$$
 
-Confrontiamo la KDE con cinque valori di $h$ diversi, più la vera densità
-in tratteggio.
+Allo stesso modo stimiamo il Bias² e la Varianza puntuali, poi integriamo:
 
-```{r plot-overview}
-h_values <- c(0.10, 0.20, h_silverman, 0.80, 1.80)
-h_labels <- c(
-  "h = 0.10  (troppo piccolo)",
-  "h = 0.20  (un po' piccolo)",
-  paste0("h = ", round(h_silverman, 2), "  (Silverman)"),
-  "h = 0.80  (un po' grande)",
-  "h = 1.80  (troppo grande)"
-)
-colori <- c("#c0392b", "#e67e22", "#27ae60", "#2980b9", "#8e44ad")
+$$\widehat{\text{Bias}^2}(h) = \int\!\bigl[\bar{\hat{f}}(x)-f(x)\bigr]^2 dx,
+\qquad
+\bar{\hat{f}}(x) = \frac{1}{B}\sum_{b=1}^{B}\hat{f}_b(x)$$
 
-df_all <- do.call(rbind, lapply(seq_along(h_values), function(i) {
-  data.frame(
-    x     = x_grid,
-    y     = kde_manual(x_grid, data, h_values[i]),
-    label = h_labels[i]
-  )
-}))
-df_all$label <- factor(df_all$label, levels = h_labels)
+$$\widehat{\text{Var}}(h) = \int\!\frac{1}{B}\sum_{b=1}^{B}
+  \bigl[\hat{f}_b(x)-\bar{\hat{f}}(x)\bigr]^2 dx$$
 
-ggplot() +
-  geom_line(data = df_true, aes(x = x, y = y),
-            color = "black", linetype = "dashed", linewidth = 0.8) +
-  geom_line(data = df_all, aes(x = x, y = y, color = label),
-            linewidth = 0.85) +
-  scale_color_manual(values = setNames(colori, h_labels)) +
-  annotate("text", x = -5.2, y = 0.38, label = "vera densità",
-           size = 3.5, color = "black", fontface = "italic") +
-  labs(
-    title    = "KDE al variare di h",
-    subtitle = paste0("f(x) = 0.4·N(-2,1) + 0.6·N(3,0.5)  |  n = ", n),
-    x = "x", y = "Densità stimata", color = NULL
-  ) +
-  theme_minimal(base_size = 13) +
-  theme(legend.position  = "bottom",
-        legend.text      = element_text(size = 10),
-        plot.title       = element_text(face = "bold"),
-        panel.grid.minor = element_blank()) +
-  guides(color = guide_legend(nrow = 2))
-```
+e si verifica che $\widehat{\text{MISE}} \approx \widehat{\text{Bias}^2} + \widehat{\text{Var}}$.
 
-Si osserva chiaramente:
+```{r slide1-calcolo}
+# ── Parametri della simulazione ───────────────────────────────────────────────
+# Aumentare B (es. 500) e length.out (es. 80) per curve più lisce,
+# a costo di maggior tempo di calcolo.
+B     <- 1000                              # numero di campioni Monte Carlo
+h_seq <- seq(0.05, 2.5, length.out = 100) # griglia di h
 
-- Con $h$ piccolo (rosso) la stima è **irregolare**: ogni osservazione forma
-  un piccolo picco, il rumore campionario domina (*overfitting*)
-- Con $h$ grande (viola) la stima è **troppo liscia**: i due picchi si fondono
-  in uno solo, la struttura bimodale scompare (*underfitting*)
-- La regola di Silverman (verde) bilancia i due estremi, ma tende già a
-  smussare un po' troppo il secondo picco (quello più stretto a destra)
+# Pre-calcolo della densità vera sulla griglia (costante, inutile ricalcolarla
+# ad ogni iterazione del doppio ciclo)
+p_true_vec <- true_density(x_grid)
 
----
+# ── Simulazione: ciclo UNICO che accumula ISE e fhat_sum insieme ──────────────
+# Ottimizzazioni rispetto alla versione originale:
+#   1. density() usa FFT in C — ordini di grandezza più veloce di kde_manual()
+#      che eseguiva un sapply() in R puro su tutti i 1000 punti della griglia.
+#   2. Un solo ciclo Monte Carlo invece di due: ISE e fhat_sum vengono
+#      calcolati nella stessa iterazione b, eliminando il secondo set.seed(123)
+#      e il secondo loop da B × 100 chiamate.
+#   3. p_true_vec pre-calcolata fuori dal loop (1000 × B × 100 chiamate in meno
+#      a true_density).
+set.seed(123)
+ise_mat  <- matrix(NA_real_, nrow = B,              ncol = length(h_seq))
+fhat_sum <- matrix(0,        nrow = length(x_grid), ncol = length(h_seq))
 
-# Il tradeoff bias-varianza
-
-## Tre casi esemplari a confronto
-
-Il grafico seguente mostra i tre casi paradigmatici affiancati, con l'area
-sotto la curva colorata per rendere più immediato il confronto visivo.
-
-```{r plot-pannello, fig.width=6.5, fig.height=8}
-make_panel <- function(h, titolo, sottotitolo, col) {
-  df <- data.frame(x = x_grid, y = kde_manual(x_grid, data, h))
-  ggplot() +
-    geom_ribbon(data = df, aes(x = x, ymin = 0, ymax = y),
-                fill = col, alpha = 0.15) +
-    geom_line(data = df, aes(x = x, y = y),
-              color = col, linewidth = 1.0) +
-    geom_line(data = df_true, aes(x = x, y = true_density(x)),
-              color = "black", linetype = "dashed", linewidth = 0.7) +
-    labs(title = titolo, subtitle = sottotitolo, x = "x", y = "Densità") +
-    ylim(0, 0.55) +
-    theme_minimal(base_size = 11) +
-    theme(plot.title       = element_text(face = "bold", color = col, size = 12),
-          plot.subtitle    = element_text(size = 9, color = "gray30"),
-          panel.grid.minor = element_blank())
+for (b in seq_len(B)) {
+  samp <- sample_mixture(n)
+  for (j in seq_along(h_seq)) {
+    # density() valuta la KDE sulla stessa griglia x_grid (from/to/n allineati)
+    fhat <- density(samp, bw = h_seq[j],
+                    from = x_grid[1], to = x_grid[length(x_grid)],
+                    n    = length(x_grid))$y
+    ise_mat[b, j]  <- sum((fhat - p_true_vec)^2) * dx   # integrazione numerica corretta
+    fhat_sum[, j]  <- fhat_sum[, j] + fhat              # accumulo per la media
+  }
+  if (b %% 200 == 0) cat(sprintf("  Completate %d / %d simulazioni\n", b, B))
 }
 
-p1 <- make_panel(0.10, "Undersmoothing", "h = 0.10  ->  overfitting",  "#c0392b")
-p2 <- make_panel(h_silverman,
-                 "Silverman",
-                 paste0("h = ", round(h_silverman, 2), "  ->  buon compromesso"),
-                 "#27ae60")
-p3 <- make_panel(1.80, "Oversmoothing",  "h = 1.80  ->  underfitting", "#8e44ad")
+# ── MISE empirico = media degli ISE sui B campioni ────────────────────────────
+mise_emp  <- colMeans(ise_mat)
 
-# Layout verticale (ncol=1): ogni pannello occupa tutta la larghezza
-(p1 / p2 / p3) +
-  plot_annotation(
-    title    = "Bias-varianza tradeoff nella KDE",
-    subtitle = paste0("Vera densità in tratteggio  |  n = ", n),
-    theme    = theme(plot.title    = element_text(face = "bold", size = 13),
-                     plot.subtitle = element_text(size = 10, color = "gray30"))
+# ── Bias² e Varianza empirici ─────────────────────────────────────────────────
+fhat_mean <- fhat_sum / B   # f̄(x) per ogni h — stimatore del valore atteso di f̂
+
+bias2_emp <- numeric(length(h_seq))
+for (j in seq_along(h_seq)) {
+  bias2_emp[j] <- sum((fhat_mean[, j] - p_true_vec)^2) * dx
+}
+
+# Varianza = MISE - Bias² (decomposizione esatta)
+var_emp <- mise_emp - bias2_emp
+
+h_mise_opt <- h_seq[which.min(mise_emp)]
+cat(sprintf("h ottimale MISE empirico (B = %d): %.4f\n", B, h_mise_opt))
+```
+
+## Grafico
+
+```{r slide1-grafico, fig.height=4.2}
+df_curve <- rbind(
+  data.frame(h = h_seq, y = bias2_emp, Componente = "Bias\U00B2"),
+  data.frame(h = h_seq, y = var_emp,   Componente = "Varianza"),
+  data.frame(h = h_seq, y = mise_emp,  Componente = "MISE")
+)
+df_curve$Componente <- factor(df_curve$Componente,
+                              levels = c("Bias\U00B2", "Varianza", "MISE"))
+
+col_curve <- c("Bias\U00B2" = "#e74c3c",
+               "Varianza"  = "#3498db",
+               "MISE"      = "#2c3e50")
+
+lwd_curve <- c("Bias\U00B2" = 0.9, "Varianza" = 0.9, "MISE" = 1.4)
+
+ggplot(df_curve, aes(x = h, y = y,
+                     colour    = Componente,
+                     linewidth = Componente)) +
+  geom_line() +
+  geom_vline(xintercept = h_mise_opt,
+             colour = "#27ae60", linetype = "dashed", linewidth = 0.8) +
+  annotate("text",
+           x = h_mise_opt + 0.06, y = max(mise_emp) * 0.90,
+           label = paste0("h* = ", round(h_mise_opt, 3)),
+           colour = "#27ae60", size = 3.5, hjust = 0) +
+  scale_colour_manual(values = col_curve) +
+  scale_linewidth_manual(values = lwd_curve) +
+  scale_y_continuous(limits = c(0, max(mise_emp) * 1.08)) +
+  labs(
+    title    = "Tradeoff Bias^2 - Varianza nella KDE (stima empirica)",
+    subtitle = paste0("Kernel gaussiano | n = ", n, " | B = ", B,
+                      " simulazioni  |  f(x) = 0.4 N(-2, 1) + 0.6 N(3, 0.5)"),
+    x        = "h  (bandwidth)",
+    y        = "Valore",
+    colour   = NULL,
+    linewidth = NULL
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title       = element_text(face = "bold"),
+    legend.position  = "bottom",
+    panel.grid.minor = element_blank()
   )
 ```
 
-Il tradeoff si può formalizzare scomponendo l'errore quadratico medio integrato
-(**MISE**):
+**Come leggere il grafico.**
+La curva rossa ($\text{Bias}^2$) cresce con $h$: una finestra larga appiattisce i picchi.
+La curva blu (Varianza) decresce con $h$: più osservazioni contribuiscono a ogni stima.
+La curva nera (MISE) è la loro somma e ha la caratteristica **forma a U**: il suo minimo
+(linea verde) è l'$h$ ottimale per questo $n$ e questa distribuzione, stimato su $B$
+simulazioni Monte Carlo.
 
-$$\text{MISE}(\hat{f}) \approx \underbrace{\frac{h^4}{4}
-  \left(\int u^2 K(u)\,du\right)^2 \int [f''(x)]^2\,dx}_{\text{bias}^2 \ \uparrow \text{ con } h}
-+ \underbrace{\frac{1}{nh} \int K^2(u)\,du}_{\text{varianza} \ \downarrow \text{ con } h}$$
+\newpage
 
-- Il **bias** cresce con $h$: una finestra larga appiattisce le strutture fini
-- La **varianza** decresce con $h$: una finestra larga aggrega più osservazioni,
-  riducendo il rumore
-- Il valore ottimale $h^* \propto n^{-1/5}$ bilancia i due termini
+# Slide 2 — DGP e variazione di $h$
 
----
+## Obiettivo
 
-# La curva ISE: trovare h ottimale
+La seconda slide ha **quattro pannelli**:
 
-## Calcolo dell'ISE al variare di h
+1. Il Data Generating Process (vera densità + campione)
+2. KDE con $h$ troppo piccolo — overfitting
+3. KDE con $h$ ottimale (minimo ISE sul campione)
+4. KDE con $h$ troppo grande — underfitting
 
-Poiché conosciamo la vera densità (siamo in un contesto simulato), possiamo
-calcolare direttamente l'**Integrated Squared Error**:
+In ogni pannello KDE la ground truth è mostrata in tratteggio per permettere il confronto
+diretto.
 
-$$\text{ISE}(h) = \int \left[\hat{f}(x) - f(x)\right]^2 dx
-\approx \sum_j \left[\hat{f}(x_j) - f(x_j)\right]^2 \Delta x$$
+## Calcolo dell'ISE e dell'h ottimale
 
-In un problema reale la vera $f$ non è nota, e si ricorre alla cross-validation
-per stimare l'ISE. Qui lo usiamo per visualizzare il concetto.
+In contesto simulato possiamo calcolare l'**ISE** (Integrated Squared Error) direttamente,
+perché conosciamo $f$:
 
-```{r calcolo-ise}
-h_seq <- seq(0.05, 2.5, length.out = 120)
-dx    <- diff(x_grid)[1]
+$$\text{ISE}(h) = \int [\hat{f}(x) - f(x)]^2\,dx
+               \approx \sum_j [\hat{f}(x_j) - f(x_j)]^2\,\Delta x$$
 
-ise_values <- sapply(h_seq, function(h) {
-  f_hat  <- kde_manual(x_grid, data, h)
-  f_true <- true_density(x_grid)
-  sum((f_hat - f_true)^2) * dx
+```{r slide2-h-opt}
+h_grid   <- seq(0.05, 2.5, length.out = 300)
+ise_grid <- sapply(h_grid, function(h) {
+  fhat <- kde_manual(x_grid, data, h)
+  sum((fhat - true_density(x_grid))^2) * dx
 })
+h_opt     <- h_grid[which.min(ise_grid)]
+ise_opt   <- min(ise_grid)
 
-h_best <- h_seq[which.min(ise_values)]
-cat("h ottimale (min ISE):", round(h_best, 3), "\n")
-cat("h Silverman:         ", round(h_silverman, 3), "\n")
-cat("Differenza:          ", round(abs(h_best - h_silverman), 3))
+cat(sprintf("h ottimale (min ISE sul campione): %.4f\n", h_opt))
+cat(sprintf("ISE minimo:                        %.6f\n", ise_opt))
 ```
 
-## Visualizzazione della curva a U
+## Pannello 1 — DGP
 
-```{r plot-ise, fig.height=4}
-df_ise <- data.frame(h = h_seq, ISE = ise_values)
-
-ggplot(df_ise, aes(x = h, y = ISE)) +
-  geom_line(color = "#2c3e50", linewidth = 1.0) +
-  geom_vline(xintercept = h_best, color = "#27ae60",
-             linetype = "dashed", linewidth = 0.9) +
-  geom_vline(xintercept = h_silverman, color = "#e67e22",
-             linetype = "dotted", linewidth = 0.9) +
-  annotate("text", x = h_best + 0.08, y = max(ise_values) * 0.92,
-           label = paste0("h ottimale\n(ISE min)\nh = ", round(h_best, 2)),
-           color = "#27ae60", size = 3.5, hjust = 0) +
-  annotate("text", x = h_silverman + 0.08, y = max(ise_values) * 0.75,
-           label = paste0("Silverman\nh = ", round(h_silverman, 2)),
-           color = "#e67e22", size = 3.5, hjust = 0) +
+```{r slide2-dgp, fig.height=3}
+p_dgp <- ggplot() +
+  geom_rug(aes(x = data),
+           alpha = 0.4, colour = "#2c3e50",
+           length = unit(0.025, "npc")) +
+  geom_line(data = df_true, aes(x = x, y = y),
+            colour = "#2c3e50", linewidth = 1.2) +
+  annotate("text", x = -4.8, y = 0.44,
+           label = "f(x) = 0.4*N(-2, 1) + 0.6*N(3, 0.5)",
+           size = 3.5, hjust = 0, colour = "gray30", fontface = "italic") +
   labs(
-    title    = "ISE in funzione di h — curva a U",
-    subtitle = paste0("n = ", n, "  |  f(x) = 0.4·N(-2,1) + 0.6·N(3,0.5)"),
-    x = "h (bandwidth)", y = "ISE"
+    title    = "Data Generating Process",
+    subtitle = paste0("n = ", n, " osservazioni (rug plot sul fondo)"),
+    x = "x", y = "Densit\u00e0"
   ) +
-  theme_minimal(base_size = 13) +
+  theme_minimal(base_size = 12) +
   theme(plot.title       = element_text(face = "bold"),
         panel.grid.minor = element_blank())
+
+p_dgp
 ```
 
-La curva ISE ha la caratteristica **forma a U**:
+## Funzione helper per i pannelli KDE
 
-- A sinistra del minimo: $h$ troppo piccolo -> varianza alta -> ISE alto
-- A destra del minimo: $h$ troppo grande -> bias alto -> ISE alto
-- Il minimo identifica il $h$ ottimale per questo campione specifico
+```{r slide2-helper}
+# Costruisce un singolo pannello KDE vs ground truth
+# h        : bandwidth da usare
+# titolo   : titolo del pannello (stringa)
+# sottotit : sottotitolo (stringa)
+# colore   : colore della curva KDE
+panel_kde <- function(h, titolo, sottotit, colore) {
+  df_kde  <- data.frame(x = x_grid,
+                        y = kde_manual(x_grid, data, h))
 
-La regola di Silverman (linea arancione tratteggiata) si posiziona vicino al
-minimo ma leggermente a destra, confermando la sua tendenza all'oversmoothing
-su distribuzioni non gaussiane.
+  ggplot() +
+    # Area sotto la curva KDE
+    geom_ribbon(data = df_kde,
+                aes(x = x, ymin = 0, ymax = y),
+                fill = colore, alpha = 0.12) +
+    # Ground truth (tratteggio nero)
+    geom_line(data = df_true,
+              aes(x = x, y = y, linetype = "Ground truth"),
+              colour = "black", linewidth = 0.75) +
+    # Stima KDE
+    geom_line(data = df_kde,
+              aes(x = x, y = y, linetype = "KDE"),
+              colour = colore, linewidth = 1.05) +
+    scale_linetype_manual(
+      values = c("Ground truth" = "dashed", "KDE" = "solid"),
+      name   = NULL
+    ) +
+    coord_cartesian(ylim = c(0, 0.60)) +
+    labs(title    = titolo,
+         subtitle = sottotit,
+         x = "x", y = "Densit\u00e0") +
+    theme_minimal(base_size = 11) +
+    theme(
+      plot.title       = element_text(face = "bold", colour = colore, size = 11),
+      plot.subtitle    = element_text(size = 8.5, colour = "gray40"),
+      legend.position  = "bottom",
+      legend.key.width = unit(1.2, "cm"),
+      panel.grid.minor = element_blank()
+    )
+}
+```
 
----
+## Pannelli 2-4 — Tre valori di $h$
 
-# Conclusioni
+```{r slide2-tre-pannelli, fig.height=3.2}
+p_small <- panel_kde(
+  h       = 0.10,
+  titolo  = "Undersmoothing",
+  sottotit = "h = 0.10  ->  overfitting",
+  colore  = "#c0392b"
+)
 
-| | $h$ piccolo | $h$ ottimale | $h$ grande |
-|---|---|---|---|
-| **Bias** | Basso | Bilanciato | Alto |
-| **Varianza** | Alta | Bilanciata | Bassa |
-| **Aspetto** | Rumoroso, irregolare | Segue la struttura vera | Troppo liscio, unimodale |
-| **ISE** | Alto | Minimo | Alto |
+p_opt_panel <- panel_kde(
+  h       = h_opt,
+  titolo  = "h ottimale (min ISE)",
+  sottotit = paste0("h = ", round(h_opt, 3), "  ->  miglior fit"),
+  colore  = "#27ae60"
+)
 
-La scelta della bandwidth è il problema centrale della KDE. La regola di
-Silverman è un buon punto di partenza ma **non è ottimale su distribuzioni
-multimodali o asimmetriche**, proprio perché assume implicitamente la
-gaussianità dei dati attraverso $\hat{\sigma}$.
+p_large <- panel_kde(
+  h       = 1.80,
+  titolo  = "Oversmoothing",
+  sottotit = "h = 1.80  ->  underfitting",
+  colore  = "#8e44ad"
+)
 
-In pratica, metodi come **Sheather-Jones** (`bw.SJ` in R) o la
-**cross-validation** forniscono stime di $h$ più robuste perché non fanno
-assunzioni sulla forma della distribuzione.
+# Stampa singoli pannelli per verifica
+p_small
+```
+
+```{r slide2-opt-panel, fig.height=3.2}
+p_opt_panel
+```
+
+```{r slide2-large-panel, fig.height=3.2}
+p_large
+```
+
+## Layout combinato (4 pannelli — pronto per la slide)
+
+```{r slide2-layout-completo, fig.height=7.5, fig.width=10}
+layout_slide2 <- (p_dgp) /
+  (p_small | p_opt_panel | p_large) +
+  plot_annotation(
+    title    = "KDE: Data Generating Process e variazione della bandwidth h",
+    subtitle = "Ground truth in tratteggio nero | n = 300",
+    theme = theme(
+      plot.title    = element_text(face = "bold", size = 14),
+      plot.subtitle = element_text(size = 10.5, colour = "gray30")
+    )
+  ) +
+  plot_layout(heights = c(1.1, 1.4))
+
+layout_slide2
+```
+
+\newpage
+
+# Slide 3 — Confronto selettori di $h$ e curva ISE
+
+## Obiettivo
+
+La terza slide ha **due pannelli affiancati**:
+
+- **Sinistra** — tabella con i valori di $h$ prodotti da cinque metodi automatici **più
+  $h^*$ (MISE empirico)** come riferimento ottimale, con il relativo MISE (calcolabile
+  qui perché conosciamo $f$).
+- **Destra** — curva MISE$(h)$ con una linea verticale colorata per ciascun selettore
+  **e per $h^*$**, così da vedere graficamente dove si posiziona ogni metodo rispetto
+  al minimo della curva.
+
+## Calcolo dei selettori
+
+Per ogni selettore calcoliamo il **MISE empirico** valutato esattamente nel valore di $h$
+suggerito — interpolando sulla griglia `h_seq` già simulata nella Slide 1.
+
+```{r slide3-selettori}
+h_methods <- c(
+  "h* (MISE)"      = h_mise_opt,      # ottimo empirico — solo in contesto simulato
+  "Silverman"      = bw.nrd0(data),
+  "Scott"          = bw.nrd(data),
+  "Sheather-Jones" = bw.SJ(data),
+  "UCV"            = bw.ucv(data),
+  "BCV"            = bw.bcv(data)
+)
+
+# MISE di ciascun selettore: interpolazione lineare sulla griglia simulata
+mise_methods <- sapply(h_methods, function(h) {
+  approx(h_seq, mise_emp, xout = h)$y
+})
+
+# Data frame ordinato per MISE crescente
+df_tab <- data.frame(
+  Metodo = names(h_methods),
+  h      = round(unname(h_methods), 4),
+  MISE   = round(unname(mise_methods), 6),
+  row.names = NULL
+)
+df_tab <- df_tab[order(df_tab$MISE), ]
+
+knitr::kable(df_tab, row.names = FALSE)
+```
+
+## Tabella formattata
+
+```{r slide3-tabella}
+if (has_kable_extra) {
+  tab <- knitr::kable(
+    df_tab,
+    format    = "latex",
+    booktabs  = TRUE,
+    caption   = "Confronto tra selettori automatici di $h$ e ottimo $h^*$ (MISE empirico, B = 500)",
+    row.names = FALSE,
+    col.names = c("Metodo", "$h$ stimato", "MISE")
+  )
+  tab <- kableExtra::kable_styling(
+    tab,
+    latex_options = c("striped", "hold_position"),
+    full_width    = FALSE,
+    font_size     = 11
+  )
+  tab <- kableExtra::row_spec(tab, 1, bold = TRUE, color = "white", background = "#27ae60")
+  kableExtra::footnote(
+    tab,
+    general = "La riga verde ($h^*$) è l'ottimo empirico ottenuto minimizzando la curva MISE su $B$ simulazioni Monte Carlo — disponibile solo in contesto simulato.",
+    general_title = "Nota:",
+    footnote_as_chunk = TRUE
+  )
+} else {
+  knitr::kable(
+    df_tab,
+    format    = "latex",
+    booktabs  = TRUE,
+    caption   = "Confronto tra selettori automatici di $h$ e ottimo $h^*$ (MISE empirico, B = 500)",
+    row.names = FALSE,
+    col.names = c("Metodo", "$h$ stimato", "MISE")
+  )
+}
+```
+
+## Curva MISE con linee verticali dei selettori
+
+Il grafico mostra il **MISE empirico** (stimato con gli stessi $B$ campioni della Slide 1)
+al variare di $h$, con una linea verticale per ciascun selettore automatico.
+Questo permette di vedere direttamente quanto ogni metodo si avvicina al minimo del MISE.
+
+```{r slide3-curva-ise, fig.height=4.5}
+# Colori coerenti con la tabella (uno per metodo)
+# h* usa il nero per segnalare che è il riferimento teorico
+col_met <- c(
+  "h* (MISE)"      = "#1a252f",
+  "Silverman"      = "#e74c3c",
+  "Scott"          = "#e67e22",
+  "Sheather-Jones" = "#27ae60",
+  "UCV"            = "#3498db",
+  "BCV"            = "#8e44ad"
+)
+
+# Riusa mise_emp e h_seq già calcolati nella Slide 1
+# (stessa griglia h_seq, stessi B campioni con set.seed(123))
+df_mise_plot <- data.frame(h = h_seq, MISE = mise_emp)
+
+# Data frame per le linee verticali (include h*)
+df_vlines <- data.frame(
+  Metodo = names(h_methods),
+  h      = unname(h_methods)
+)
+df_vlines$Metodo <- factor(df_vlines$Metodo, levels = names(col_met))
+
+# Linee tratteggiate per i selettori automatici, linea solida per h*
+df_vlines$linetype <- ifelse(df_vlines$Metodo == "h* (MISE)", "solid", "dashed")
+
+# Punto di minimo MISE
+h_mise_min <- h_seq[which.min(mise_emp)]
+mise_min   <- min(mise_emp)
+
+p_ise <- ggplot(df_mise_plot, aes(x = h, y = MISE)) +
+  geom_line(colour = "#2c3e50", linewidth = 1.1) +
+  # Linee verticali per i selettori automatici (tratteggiate)
+  geom_vline(data = df_vlines[df_vlines$Metodo != "h* (MISE)", ],
+             aes(xintercept = h, colour = Metodo),
+             linewidth = 0.85, linetype = "dashed") +
+  # Linea verticale per h* (solida, più spessa)
+  geom_vline(data = df_vlines[df_vlines$Metodo == "h* (MISE)", ],
+             aes(xintercept = h, colour = Metodo),
+             linewidth = 1.2, linetype = "solid") +
+  # Punto di minimo MISE
+  geom_point(x = h_mise_min, y = mise_min,
+             colour = "#1a252f", size = 3.5, shape = 16) +
+  annotate("text",
+           x = h_mise_min + 0.07, y = mise_min + diff(range(mise_emp)) * 0.06,
+           label = paste0("h* = ", round(h_mise_min, 3)),
+           size = 3.3, hjust = 0, colour = "#1a252f") +
+  scale_x_continuous(limits = c(0, max(df_vlines$h, na.rm = TRUE) * 1.3)) +
+  scale_colour_manual(values = col_met, name = "Selettore / Riferimento") +
+  labs(
+    title    = "MISE empirico in funzione di h - curva a U",
+    subtitle = paste0("n = ", n, " | B = ", B,
+                      " simulazioni  |  f(x) = 0.4 N(-2, 1) + 0.6 N(3, 0.5)"),
+    x        = "h  (bandwidth)",
+    y        = "MISE"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title       = element_text(face = "bold"),
+    legend.position  = "bottom",
+    legend.text      = element_text(size = 9),
+    panel.grid.minor = element_blank()
+  ) +
+  guides(colour = guide_legend(nrow = 2))
+
+p_ise
+```
+
+**Lettura del grafico.**
+La curva a U ha il minimo (punto nero) in corrispondenza dell'$h$ ottimale per il MISE
+stimato su $B$ simulazioni — questa è la quantità teoricamente rilevante, a differenza
+dell'ISE su un singolo campione che dipende dalla realizzazione specifica.
+Le linee verticali mostrano dove si posiziona ogni selettore: Silverman e Scott (rosso/arancio)
+tendono a stare *a destra* del minimo, confermando la loro tendenza all'oversmoothing su
+distribuzioni non gaussiane; Sheather–Jones e i metodi cross-validation si avvicinano
+maggiormente al minimo.
+
+\newpage
+
+# Riepilogo
+
+```{r riepilogo-tabella}
+# Tabella riepilogativa finale: selettori con distanza da h* MISE e rapporto MISE
+df_final <- df_tab
+df_final$"Distanza da h*"  <- round(abs(df_final$h - h_mise_min), 4)
+df_final$"MISE / MISE min" <- round(df_final$MISE / mise_min, 3)
+
+if (has_kable_extra) {
+  tab_final <- knitr::kable(
+    df_final,
+    format    = "latex",
+    booktabs  = TRUE,
+    caption   = "Riepilogo: selettori di $h$ a confronto con l'ottimo $h^*$ (MISE empirico)",
+    row.names = FALSE
+  )
+  tab_final <- kableExtra::kable_styling(
+    tab_final,
+    latex_options = c("striped", "hold_position"),
+    full_width    = FALSE,
+    font_size     = 10
+  )
+  kableExtra::row_spec(tab_final, 1, bold = TRUE)
+} else {
+  knitr::kable(
+    df_final,
+    format    = "latex",
+    booktabs  = TRUE,
+    caption   = "Riepilogo: selettori di $h$ a confronto con l'ottimo $h^*$ (MISE empirico)",
+    row.names = FALSE
+  )
+}
+```
+
+**Osservazione principale.** Su questa distribuzione bimodale:
+
+- $h^*$ (MISE empirico) è il **riferimento ottimale**: ha distanza 0 dall'ottimo e
+  rapporto MISE/MISE\textsubscript{min} = 1.000 per definizione.
+  È calcolabile solo perché siamo in contesto simulato e conosciamo $f$.
+- Silverman e Scott sovrastimano $h$ perché $\hat{\sigma}$ è gonfiata dalla distanza tra i
+  due picchi (~5 unità), producendo un MISE significativamente superiore al minimo.
+- Sheather–Jones stima $h$ più vicino all'ottimale, poiché il suo procedimento plug-in
+  tiene conto della curvatura locale della distribuzione.
+- UCV e BCV minimizzano direttamente un criterio legato al MISE stimato sul campione
+  tramite leave-one-out, ma possono essere instabili (UCV in particolare può avere
+  minimi multipli per campioni piccoli).
+
+Per distribuzioni semplici (unimodali, approssimativamente gaussiane) Silverman è un
+ottimo punto di partenza. Per distribuzioni complesse, preferire Sheather–Jones o
+cross-validation.
