@@ -186,8 +186,8 @@ e si verifica che $\widehat{\text{MISE}} \approx \widehat{\text{Bias}^2} + \wide
 # ── Parametri della simulazione ───────────────────────────────────────────────
 # Aumentare B (es. 500) e length.out (es. 80) per curve più lisce,
 # a costo di maggior tempo di calcolo.
-B     <- 1000                              # numero di campioni Monte Carlo
-h_seq <- seq(0.05, 2.5, length.out = 100) # griglia di h
+B     <- 100                               # numero di campioni Monte Carlo
+h_seq <- seq(0.01, 2.5, length.out = 200) # griglia di h (piu punti per curva MISE piu liscia)
 
 # Pre-calcolo della densità vera sulla griglia (costante, inutile ricalcolarla
 # ad ogni iterazione del doppio ciclo)
@@ -213,7 +213,7 @@ for (b in seq_len(B)) {
     fhat <- density(samp, bw = h_seq[j],
                     from = x_grid[1], to = x_grid[length(x_grid)],
                     n    = length(x_grid))$y
-    ise_mat[b, j]  <- sum((fhat - p_true_vec)^2) * dx   # integrazione numerica corretta
+    ise_mat[b, j]  <- sum((fhat - p_true_vec)^2) * dx   # integrazione numerica dell'ISE
     fhat_sum[, j]  <- fhat_sum[, j] + fhat              # accumulo per la media
   }
   if (b %% 200 == 0) cat(sprintf("  Completate %d / %d simulazioni\n", b, B))
@@ -252,11 +252,13 @@ col_curve <- c("Bias\U00B2" = "#e74c3c",
                "Varianza"  = "#3498db",
                "MISE"      = "#2c3e50")
 
-lwd_curve <- c("Bias\U00B2" = 0.9, "Varianza" = 0.9, "MISE" = 1.4)
+lwd_curve <- c("Bias\U00B2" = 0.9, "Varianza" = 0.9, "MISE" = 0.75)
+lty_curve <- c("Bias\U00B2" = "solid", "Varianza" = "solid", "MISE" = "dashed")
 
 ggplot(df_curve, aes(x = h, y = y,
                      colour    = Componente,
-                     linewidth = Componente)) +
+                     linewidth = Componente,
+                     linetype  = Componente)) +
   geom_line() +
   geom_vline(xintercept = h_mise_opt,
              colour = "#27ae60", linetype = "dashed", linewidth = 0.8) +
@@ -266,6 +268,7 @@ ggplot(df_curve, aes(x = h, y = y,
            colour = "#27ae60", size = 3.5, hjust = 0) +
   scale_colour_manual(values = col_curve) +
   scale_linewidth_manual(values = lwd_curve) +
+  scale_linetype_manual(values = lty_curve) +
   scale_y_continuous(limits = c(0, max(mise_emp) * 1.08)) +
   labs(
     title    = "Tradeoff Bias^2 - Varianza nella KDE (stima empirica)",
@@ -274,7 +277,8 @@ ggplot(df_curve, aes(x = h, y = y,
     x        = "h  (bandwidth)",
     y        = "Valore",
     colour   = NULL,
-    linewidth = NULL
+    linewidth = NULL,
+    linetype = NULL
   ) +
   theme_minimal(base_size = 13) +
   theme(
@@ -566,20 +570,31 @@ df_vlines$Metodo <- factor(df_vlines$Metodo, levels = names(col_met))
 # Linee tratteggiate per i selettori automatici, linea solida per h*
 df_vlines$linetype <- ifelse(df_vlines$Metodo == "h* (MISE)", "solid", "dashed")
 
+# Tipi di tratteggio differenziati per migliorare la leggibilita
+# quando due selettori cadono su valori di h molto vicini.
+lty_met <- c(
+  "h* (MISE)"      = "solid",
+  "Silverman"      = "longdash",
+  "Scott"          = "dashed",
+  "Sheather-Jones" = "dotdash",
+  "UCV"            = "twodash",
+  "BCV"            = "dotted"
+)
+
 # Punto di minimo MISE
 h_mise_min <- h_seq[which.min(mise_emp)]
 mise_min   <- min(mise_emp)
 
 p_ise <- ggplot(df_mise_plot, aes(x = h, y = MISE)) +
-  geom_line(colour = "#2c3e50", linewidth = 1.1) +
+  geom_line(colour = "#2c3e50", linewidth = 0.85) +
   # Linee verticali per i selettori automatici (tratteggiate)
   geom_vline(data = df_vlines[df_vlines$Metodo != "h* (MISE)", ],
-             aes(xintercept = h, colour = Metodo),
-             linewidth = 0.85, linetype = "dashed") +
+             aes(xintercept = h, colour = Metodo, linetype = Metodo),
+             linewidth = 0.85) +
   # Linea verticale per h* (solida, più spessa)
   geom_vline(data = df_vlines[df_vlines$Metodo == "h* (MISE)", ],
              aes(xintercept = h, colour = Metodo),
-             linewidth = 1.2, linetype = "solid") +
+             linewidth = 0.85, linetype = "solid") +
   # Punto di minimo MISE
   geom_point(x = h_mise_min, y = mise_min,
              colour = "#1a252f", size = 3.5, shape = 16) +
@@ -587,8 +602,9 @@ p_ise <- ggplot(df_mise_plot, aes(x = h, y = MISE)) +
            x = h_mise_min + 0.07, y = mise_min + diff(range(mise_emp)) * 0.06,
            label = paste0("h* = ", round(h_mise_min, 3)),
            size = 3.3, hjust = 0, colour = "#1a252f") +
-  scale_x_continuous(limits = c(0, max(df_vlines$h, na.rm = TRUE) * 1.3)) +
+  scale_x_continuous(limits = c(0, NA)) +
   scale_colour_manual(values = col_met, name = "Selettore / Riferimento") +
+  scale_linetype_manual(values = lty_met, guide = "none") +
   labs(
     title    = "MISE empirico in funzione di h - curva a U",
     subtitle = paste0("n = ", n, " | B = ", B,
