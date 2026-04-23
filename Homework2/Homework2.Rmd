@@ -365,27 +365,35 @@ p_dgp
 # sottotit : sottotitolo (stringa)
 # colore   : colore della curva KDE
 panel_kde <- function(h, titolo, sottotit, colore) {
-  df_kde  <- data.frame(x = x_grid,
-                        y = kde_manual(x_grid, data, h))
+  df_kde  <- data.frame(
+    x = x_grid,
+    y = density(
+      data,
+      bw = h,
+      from = x_grid[1],
+      to = x_grid[length(x_grid)],
+      n = length(x_grid)
+    )$y
+  )
 
   ggplot() +
     # Area sotto la curva KDE
     geom_ribbon(data = df_kde,
                 aes(x = x, ymin = 0, ymax = y),
                 fill = colore, alpha = 0.12) +
-    # Ground truth (tratteggio nero)
-    geom_line(data = df_true,
-              aes(x = x, y = y, linetype = "Ground truth"),
-              colour = "black", linewidth = 0.75) +
     # Stima KDE
     geom_line(data = df_kde,
               aes(x = x, y = y, linetype = "KDE"),
               colour = colore, linewidth = 1.05) +
+    # Ground truth (tratteggio nero) sopra la KDE per massima visibilita
+    geom_line(data = df_true,
+              aes(x = x, y = y, linetype = "Ground truth"),
+              colour = "black", linewidth = 0.9) +
     scale_linetype_manual(
       values = c("Ground truth" = "dashed", "KDE" = "solid"),
       name   = NULL
     ) +
-    coord_cartesian(ylim = c(0, 0.60)) +
+    coord_cartesian(ylim = c(0, 0.67)) +
     labs(title    = titolo,
          subtitle = sottotit,
          x = "x", y = "Densit\u00e0") +
@@ -404,23 +412,23 @@ panel_kde <- function(h, titolo, sottotit, colore) {
 
 ```{r slide2-tre-pannelli, fig.height=3.2}
 p_small <- panel_kde(
-  h       = 0.10,
+  h       = 0.01,
   titolo  = "Undersmoothing",
-  sottotit = "h = 0.10  ->  overfitting",
+  sottotit = "h = 0.01  ->  overfitting",
   colore  = "#c0392b"
 )
 
 p_opt_panel <- panel_kde(
-  h       = h_opt,
-  titolo  = "h ottimale (min ISE)",
-  sottotit = paste0("h = ", round(h_opt, 3), "  ->  miglior fit"),
+  h       = 0.30,
+  titolo  = "Buona scelta",
+  sottotit = "h = 0.30  ->  buon fit",
   colore  = "#27ae60"
 )
 
 p_large <- panel_kde(
-  h       = 1.80,
+  h       = 2.00,
   titolo  = "Oversmoothing",
-  sottotit = "h = 1.80  ->  underfitting",
+  sottotit = "h = 2.00  ->  underfitting",
   colore  = "#8e44ad"
 )
 
@@ -497,8 +505,6 @@ df_tab <- data.frame(
   row.names = NULL
 )
 df_tab <- df_tab[order(df_tab$MISE), ]
-
-knitr::kable(df_tab, row.names = FALSE)
 ```
 
 ## Tabella formattata
@@ -510,6 +516,7 @@ if (has_kable_extra) {
     format    = "latex",
     booktabs  = TRUE,
     caption   = "Confronto tra selettori automatici di $h$ e ottimo $h^*$ (MISE empirico, B = 500)",
+    escape    = FALSE,
     row.names = FALSE,
     col.names = c("Metodo", "$h$ stimato", "MISE")
   )
@@ -532,6 +539,7 @@ if (has_kable_extra) {
     format    = "latex",
     booktabs  = TRUE,
     caption   = "Confronto tra selettori automatici di $h$ e ottimo $h^*$ (MISE empirico, B = 500)",
+    escape    = FALSE,
     row.names = FALSE,
     col.names = c("Metodo", "$h$ stimato", "MISE")
   )
