@@ -1,6 +1,5 @@
 ---
 title: "Kernel Density Estimation"
-subtitle: "Analisi e implementazione in R"
 date: "`r format(Sys.Date(), '%d %B %Y')`"
 output:
   pdf_document:
@@ -150,11 +149,11 @@ df_true <- data.frame(x = x_grid, y = true_density(x_grid))
 
 \newpage
 
-# Bias, Varianza e curva MISE
+# Sezione 1 — Bias, Varianza e curva MISE
 
 ## Obiettivo
 
-Questa sezione è **teorica**: mostra visivamente perché esiste un $h$ ottimale, disegnando
+La prima sezione è **teorica**: mostra visivamente perché esiste un $h$ ottimale, disegnando
 le tre curve — $\text{Bias}^2(h)$, $\text{Varianza}(h)$ e $\text{MISE}(h)$ — come funzione
 di $h$, stimate empiricamente tramite simulazione Monte Carlo.
 
@@ -182,7 +181,7 @@ $$\widehat{\text{Var}}(h) = \int\!\frac{1}{B}\sum_{b=1}^{B}
 
 e si verifica che $\widehat{\text{MISE}} \approx \widehat{\text{Bias}^2} + \widehat{\text{Var}}$.
 
-```{r sec1-calcolo}
+```{r sez1-calcolo}
 # ── Parametri della simulazione ───────────────────────────────────────────────
 # Aumentare B (es. 500) e length.out (es. 80) per curve più lisce,
 # a costo di maggior tempo di calcolo.
@@ -239,7 +238,7 @@ cat(sprintf("h ottimale MISE empirico (B = %d): %.4f\n", B, h_mise_opt))
 
 ## Grafico
 
-```{r sec1-grafico, fig.height=4.2}
+```{r sez1-grafico, fig.height=4.2}
 df_curve <- rbind(
   data.frame(h = h_seq, y = bias2_emp, Componente = "Bias\U00B2"),
   data.frame(h = h_seq, y = var_emp,   Componente = "Varianza"),
@@ -297,11 +296,11 @@ simulazioni Monte Carlo.
 
 \newpage
 
-# DGP e variazione di $h$
+# Sezione 2 — DGP e variazione di $h$
 
 ## Obiettivo
 
-Questa sezione presenta **quattro pannelli**:
+La seconda sezione ha **quattro pannelli**:
 
 1. Il Data Generating Process (vera densità + campione)
 2. KDE con $h$ troppo piccolo — overfitting
@@ -319,7 +318,7 @@ perché conosciamo $f$:
 $$\text{ISE}(h) = \int [\hat{f}(x) - f(x)]^2\,dx
                \approx \sum_j [\hat{f}(x_j) - f(x_j)]^2\,\Delta x$$
 
-```{r sec2-h-opt}
+```{r sez2-h-opt}
 h_grid   <- seq(0.05, 2.5, length.out = 300)
 ise_grid <- sapply(h_grid, function(h) {
   fhat <- kde_manual(x_grid, data, h)
@@ -334,7 +333,7 @@ cat(sprintf("ISE minimo:                        %.6f\n", ise_opt))
 
 ## Pannello 1 — DGP
 
-```{r sec2-dgp, fig.height=3}
+```{r sez2-dgp, fig.height=3}
 p_dgp <- ggplot() +
   geom_rug(aes(x = data),
            alpha = 0.4, colour = "#2c3e50",
@@ -358,7 +357,7 @@ p_dgp
 
 ## Funzione helper per i pannelli KDE
 
-```{r sec2-helper}
+```{r sez2-helper}
 # Costruisce un singolo pannello KDE vs ground truth
 # h        : bandwidth da usare
 # titolo   : titolo del pannello (stringa)
@@ -410,7 +409,7 @@ panel_kde <- function(h, titolo, sottotit, colore) {
 
 ## Pannelli 2-4 — Tre valori di $h$
 
-```{r sec2-tre-pannelli, fig.height=3.2}
+```{r sez2-tre-pannelli, fig.height=3.2}
 p_small <- panel_kde(
   h       = 0.01,
   titolo  = "Undersmoothing",
@@ -436,18 +435,18 @@ p_large <- panel_kde(
 p_small
 ```
 
-```{r sec2-opt-panel, fig.height=3.2}
+```{r sez2-opt-panel, fig.height=3.2}
 p_opt_panel
 ```
 
-```{r sec2-large-panel, fig.height=3.2}
+```{r sez2-large-panel, fig.height=3.2}
 p_large
 ```
 
-## Layout combinato (4 pannelli)
+## Layout combinato (4 pannelli — pronto per la presentazione)
 
-```{r sec2-layout-completo, fig.height=7.5, fig.width=10}
-layout_sec2 <- (p_dgp) /
+```{r sez2-layout-completo, fig.height=7.5, fig.width=10}
+layout_sezione2 <- (p_dgp) /
   (p_small | p_opt_panel | p_large) +
   plot_annotation(
     title    = "KDE: Data Generating Process e variazione della bandwidth h",
@@ -459,30 +458,23 @@ layout_sec2 <- (p_dgp) /
   ) +
   plot_layout(heights = c(1.1, 1.4))
 
-layout_sec2
+layout_sezione2
 ```
 
 \newpage
 
-# Confronto selettori di $h$ e curva ISE
+# Sezione 3 — Confronto selettori di $h$ e curva MISE
 
 ## Obiettivo
 
-Questa sezione presenta **due pannelli**:
-
-- **Tabella** con i valori di $h$ prodotti da cinque metodi automatici **più
-  $h^*$ (MISE empirico)** come riferimento ottimale, con il relativo MISE (calcolabile
-  qui perché conosciamo $f$).
-- **Curva MISE$(h)$** con una linea verticale colorata per ciascun selettore
-  **e per $h^*$**, così da vedere graficamente dove si posiziona ogni metodo rispetto
-  al minimo della curva.
+Nella terza sezione confrontiamo i valori di $h$ suggeriti da cinque metodi automatici con l'$h^*$ ottimale visualizzandoli anche graficamente sulla curva MISE empirica stimata nella prima sezione.
 
 ## Calcolo dei selettori
 
 Per ogni selettore calcoliamo il **MISE empirico** valutato esattamente nel valore di $h$
-suggerito — interpolando sulla griglia `h_seq` già simulata nella Sezione 3.
+suggerito — interpolando sulla griglia `h_seq` già simulata nella prima sezione.
 
-```{r sec3-selettori}
+```{r sez3-selettori}
 h_methods <- c(
   "h* (MISE)"      = h_mise_opt,      # ottimo empirico — solo in contesto simulato
   "Silverman"      = bw.nrd0(data),
@@ -509,7 +501,7 @@ df_tab <- df_tab[order(df_tab$MISE), ]
 
 ## Tabella formattata
 
-```{r sec3-tabella}
+```{r sez3-tabella}
 if (has_kable_extra) {
   tab <- knitr::kable(
     df_tab,
@@ -548,11 +540,11 @@ if (has_kable_extra) {
 
 ## Curva MISE con linee verticali dei selettori
 
-Il grafico mostra il **MISE empirico** (stimato con gli stessi $B$ campioni della Sezione 3)
+Il grafico mostra il **MISE empirico** (stimato con gli stessi $B$ campioni della prima sezione)
 al variare di $h$, con una linea verticale per ciascun selettore automatico.
 Questo permette di vedere direttamente quanto ogni metodo si avvicina al minimo del MISE.
 
-```{r sec3-curva-ise, fig.height=4.5}
+```{r sez3-curva-ise, fig.height=4.5}
 # Colori coerenti con la tabella (uno per metodo)
 # h* usa il nero per segnalare che è il riferimento teorico
 col_met <- c(
@@ -564,7 +556,7 @@ col_met <- c(
   "BCV"            = "#8e44ad"
 )
 
-# Riusa mise_emp e h_seq già calcolati nella Sezione 3
+# Riusa mise_emp e h_seq già calcolati nella prima sezione
 # (stessa griglia h_seq, stessi B campioni con set.seed(123))
 df_mise_plot <- data.frame(h = h_seq, MISE = mise_emp)
 
