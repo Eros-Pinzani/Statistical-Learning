@@ -1,6 +1,6 @@
 ---
 title: "Kernel Density Estimation"
-subtitle: "Codice annotato per la presentazione — tre slide"
+subtitle: "Analisi e implementazione in R"
 date: "`r format(Sys.Date(), '%d %B %Y')`"
 output:
   pdf_document:
@@ -150,11 +150,11 @@ df_true <- data.frame(x = x_grid, y = true_density(x_grid))
 
 \newpage
 
-# Slide 1 — Bias, Varianza e curva MISE
+# Bias, Varianza e curva MISE
 
 ## Obiettivo
 
-La prima slide è **teorica**: mostra visivamente perché esiste un $h$ ottimale, disegnando
+Questa sezione è **teorica**: mostra visivamente perché esiste un $h$ ottimale, disegnando
 le tre curve — $\text{Bias}^2(h)$, $\text{Varianza}(h)$ e $\text{MISE}(h)$ — come funzione
 di $h$, stimate empiricamente tramite simulazione Monte Carlo.
 
@@ -182,7 +182,7 @@ $$\widehat{\text{Var}}(h) = \int\!\frac{1}{B}\sum_{b=1}^{B}
 
 e si verifica che $\widehat{\text{MISE}} \approx \widehat{\text{Bias}^2} + \widehat{\text{Var}}$.
 
-```{r slide1-calcolo}
+```{r sec1-calcolo}
 # ── Parametri della simulazione ───────────────────────────────────────────────
 # Aumentare B (es. 500) e length.out (es. 80) per curve più lisce,
 # a costo di maggior tempo di calcolo.
@@ -239,7 +239,7 @@ cat(sprintf("h ottimale MISE empirico (B = %d): %.4f\n", B, h_mise_opt))
 
 ## Grafico
 
-```{r slide1-grafico, fig.height=4.2}
+```{r sec1-grafico, fig.height=4.2}
 df_curve <- rbind(
   data.frame(h = h_seq, y = bias2_emp, Componente = "Bias\U00B2"),
   data.frame(h = h_seq, y = var_emp,   Componente = "Varianza"),
@@ -297,11 +297,11 @@ simulazioni Monte Carlo.
 
 \newpage
 
-# Slide 2 — DGP e variazione di $h$
+# DGP e variazione di $h$
 
 ## Obiettivo
 
-La seconda slide ha **quattro pannelli**:
+Questa sezione presenta **quattro pannelli**:
 
 1. Il Data Generating Process (vera densità + campione)
 2. KDE con $h$ troppo piccolo — overfitting
@@ -319,7 +319,7 @@ perché conosciamo $f$:
 $$\text{ISE}(h) = \int [\hat{f}(x) - f(x)]^2\,dx
                \approx \sum_j [\hat{f}(x_j) - f(x_j)]^2\,\Delta x$$
 
-```{r slide2-h-opt}
+```{r sec2-h-opt}
 h_grid   <- seq(0.05, 2.5, length.out = 300)
 ise_grid <- sapply(h_grid, function(h) {
   fhat <- kde_manual(x_grid, data, h)
@@ -334,7 +334,7 @@ cat(sprintf("ISE minimo:                        %.6f\n", ise_opt))
 
 ## Pannello 1 — DGP
 
-```{r slide2-dgp, fig.height=3}
+```{r sec2-dgp, fig.height=3}
 p_dgp <- ggplot() +
   geom_rug(aes(x = data),
            alpha = 0.4, colour = "#2c3e50",
@@ -358,7 +358,7 @@ p_dgp
 
 ## Funzione helper per i pannelli KDE
 
-```{r slide2-helper}
+```{r sec2-helper}
 # Costruisce un singolo pannello KDE vs ground truth
 # h        : bandwidth da usare
 # titolo   : titolo del pannello (stringa)
@@ -410,7 +410,7 @@ panel_kde <- function(h, titolo, sottotit, colore) {
 
 ## Pannelli 2-4 — Tre valori di $h$
 
-```{r slide2-tre-pannelli, fig.height=3.2}
+```{r sec2-tre-pannelli, fig.height=3.2}
 p_small <- panel_kde(
   h       = 0.01,
   titolo  = "Undersmoothing",
@@ -436,18 +436,18 @@ p_large <- panel_kde(
 p_small
 ```
 
-```{r slide2-opt-panel, fig.height=3.2}
+```{r sec2-opt-panel, fig.height=3.2}
 p_opt_panel
 ```
 
-```{r slide2-large-panel, fig.height=3.2}
+```{r sec2-large-panel, fig.height=3.2}
 p_large
 ```
 
-## Layout combinato (4 pannelli — pronto per la slide)
+## Layout combinato (4 pannelli)
 
-```{r slide2-layout-completo, fig.height=7.5, fig.width=10}
-layout_slide2 <- (p_dgp) /
+```{r sec2-layout-completo, fig.height=7.5, fig.width=10}
+layout_sec2 <- (p_dgp) /
   (p_small | p_opt_panel | p_large) +
   plot_annotation(
     title    = "KDE: Data Generating Process e variazione della bandwidth h",
@@ -459,30 +459,30 @@ layout_slide2 <- (p_dgp) /
   ) +
   plot_layout(heights = c(1.1, 1.4))
 
-layout_slide2
+layout_sec2
 ```
 
 \newpage
 
-# Slide 3 — Confronto selettori di $h$ e curva ISE
+# Confronto selettori di $h$ e curva ISE
 
 ## Obiettivo
 
-La terza slide ha **due pannelli affiancati**:
+Questa sezione presenta **due pannelli**:
 
-- **Sinistra** — tabella con i valori di $h$ prodotti da cinque metodi automatici **più
+- **Tabella** con i valori di $h$ prodotti da cinque metodi automatici **più
   $h^*$ (MISE empirico)** come riferimento ottimale, con il relativo MISE (calcolabile
   qui perché conosciamo $f$).
-- **Destra** — curva MISE$(h)$ con una linea verticale colorata per ciascun selettore
+- **Curva MISE$(h)$** con una linea verticale colorata per ciascun selettore
   **e per $h^*$**, così da vedere graficamente dove si posiziona ogni metodo rispetto
   al minimo della curva.
 
 ## Calcolo dei selettori
 
 Per ogni selettore calcoliamo il **MISE empirico** valutato esattamente nel valore di $h$
-suggerito — interpolando sulla griglia `h_seq` già simulata nella Slide 1.
+suggerito — interpolando sulla griglia `h_seq` già simulata nella Sezione 3.
 
-```{r slide3-selettori}
+```{r sec3-selettori}
 h_methods <- c(
   "h* (MISE)"      = h_mise_opt,      # ottimo empirico — solo in contesto simulato
   "Silverman"      = bw.nrd0(data),
@@ -509,7 +509,7 @@ df_tab <- df_tab[order(df_tab$MISE), ]
 
 ## Tabella formattata
 
-```{r slide3-tabella}
+```{r sec3-tabella}
 if (has_kable_extra) {
   tab <- knitr::kable(
     df_tab,
@@ -548,11 +548,11 @@ if (has_kable_extra) {
 
 ## Curva MISE con linee verticali dei selettori
 
-Il grafico mostra il **MISE empirico** (stimato con gli stessi $B$ campioni della Slide 1)
+Il grafico mostra il **MISE empirico** (stimato con gli stessi $B$ campioni della Sezione 3)
 al variare di $h$, con una linea verticale per ciascun selettore automatico.
 Questo permette di vedere direttamente quanto ogni metodo si avvicina al minimo del MISE.
 
-```{r slide3-curva-ise, fig.height=4.5}
+```{r sec3-curva-ise, fig.height=4.5}
 # Colori coerenti con la tabella (uno per metodo)
 # h* usa il nero per segnalare che è il riferimento teorico
 col_met <- c(
@@ -564,7 +564,7 @@ col_met <- c(
   "BCV"            = "#8e44ad"
 )
 
-# Riusa mise_emp e h_seq già calcolati nella Slide 1
+# Riusa mise_emp e h_seq già calcolati nella Sezione 3
 # (stessa griglia h_seq, stessi B campioni con set.seed(123))
 df_mise_plot <- data.frame(h = h_seq, MISE = mise_emp)
 
