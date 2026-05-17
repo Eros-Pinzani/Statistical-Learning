@@ -141,8 +141,9 @@ e questa distribuzione cambia ad ogni esecuzione del modello:
 > importanti può cambiare sostanzialmente. Questo è il problema dell'**instabilità**.
 
 In un contesto reale — dove si vogliono identificare le variabili davvero causali — questa
-instabilità è pericolosa: il "gene più importante" di oggi potrebbe non comparire nella lista
-di domani.
+instabilità è pericolosa: un analista che selezionasse le prime $k$ variabili potrebbe includere
+variabili rumore diverse ad ogni esecuzione, e il "gene più importante" di oggi potrebbe non
+comparire nella lista di domani.
 
 ## Soluzioni: Conditional Importance e Stability Selection
 
@@ -310,8 +311,8 @@ La MDI assegna importanza crescente man mano che la cardinalità aumenta. La var
 riceve un'importanza nettamente più alta di quella binaria, pur contenendo esattamente le stesse
 informazioni: nessuna. La Permutation Importance si comporta invece correttamente: rimescolare
 un predittore irrilevante non cambia le previsioni OOB. Si noti tuttavia che anche la Permutation
-mostra valori leggermente positivi per le variabili a cardinalità maggiore (X_cat15, X_cont): questo
-è normale variabilità campionaria, non un bias sistematico, e tende a zero al crescere di $n$.
+mostra valori leggermente positivi per le variabili a cardinalità maggiore (X\_cat15, X\_cont):
+questo è normale variabilità campionaria, non un bias sistematico, e tende a zero al crescere di $n$.
 
 ---
 
@@ -326,8 +327,8 @@ predittivo. Il segnale causale è deliberatamente debole:
 $$Y = 0.8 \cdot X_1 + \varepsilon, \qquad \varepsilon \sim \mathcal{N}(0,1),
   \qquad \mathbf{X} \sim \mathcal{N}(\mathbf{0},\, \Sigma_{\rho}^{\mathrm{AR(1)}})$$
 
-Con un coefficiente $\beta_1 = 0.8$ e $n = 150$ osservazioni, il rapporto segnale/rumore è basso:
-un metodo instabile fatica a distinguere $X_1$ dalle sue vicine correlate.
+Con $\beta_1 = 0.8$ e $n = 150$ osservazioni, il rapporto segnale/rumore è basso: un metodo
+instabile fatica a distinguere $X_1$ dalle sue vicine correlate.
 
 ```{r exp2-data}
 n   <- 150
@@ -347,8 +348,8 @@ df_corr   <- data.frame(Y = Y_corr, X_mat)
 ## Instabilità: il ranking MDI cambia tra run
 
 Eseguiamo lo stesso Random Forest 30 volte cambiando solo il seme casuale (non i dati) e
-registriamo il rango assegnato dalla MDI a ciascuna variabile. Mostriamo anche i ranghi medi
-e la deviazione standard di X1.
+registriamo il rango assegnato dalla MDI a ciascuna variabile (1 = più importante).
+Stampiamo la tabella completa di medie e deviazioni standard per ogni variabile.
 
 ```{r exp2-instability, cache=TRUE}
 n_runs      <- 30
@@ -361,15 +362,10 @@ for (i in seq_len(n_runs)) {
   rank_matrix[, i] <- rank(-importance(rf_i, type = 2)[, 1])
 }
 
-rank_X1 <- rank_matrix["X1", ]
-cat(sprintf(
-  "X1 — Rango medio: %.1f  |  SD: %.2f  |  Min: %d  |  Max: %d\n",
-  mean(rank_X1), sd(rank_X1), min(rank_X1), max(rank_X1)
-))
-
-# Rango medio di tutte le variabili (tabella sintetica)
+# Tabella sintetica: rango medio e SD per ciascuna variabile
 rank_summary <- apply(rank_matrix, 1, function(x)
-  c(media = round(mean(x), 1), sd = round(sd(x), 2)))
+  c(media = round(mean(x), 1), sd = round(sd(x), 2),
+    min = min(x), max = max(x)))
 print(t(rank_summary))
 ```
 
@@ -393,21 +389,24 @@ ggplot(rank_long,
   ) +
   labs(
     title    = "Instabilità dei ranghi MDI su 30 run indipendenti",
-    subtitle = paste0("n=", n, ", p=", p, " predittori, AR(1) con rho=", rho,
-              ", beta1=0.8 - solo X1 è causale"),
-    x = NULL, y = "Rango MDI (1 = più importante)"
+    subtitle = paste0("n=", n, ", p=", p, " predittori, AR(1) con \u03c1=", rho,
+                      ", \u03b2\u2081=0.8 — solo X1 \u00e8 causale"),
+    x = NULL, y = "Rango MDI (1 = pi\u00f9 importante)"
   )
 ```
 
-**Lettura del grafico:**
+**Lettura del grafico e della tabella:**
 Ogni box mostra la distribuzione dei ranghi di una variabile nelle 30 esecuzioni.
-Una box stretta significa stabilità; una box allargata significa che il rango cambia molto
-tra un'esecuzione e l'altra.
 
-Con $\rho = 0.95$ e segnale debole, l'instabilità diventa concreta: $X_2$, $X_3$ e $X_4$
-ottengono ranghi migliori di $X_1$ in molte esecuzioni, pur non avendo alcun effetto causale
-su $Y$. Il loro segnale è un puro riflesso della correlazione con $X_1$, e quale delle correlate
-"vince" in un dato run dipende da fattori puramente casuali del bootstrap.
+Il risultato rivela due livelli distinti di instabilità. In cima, $X_1$ e $X_2$ mantengono
+le prime due posizioni in modo quasi stabile (SD bassa): la MDI riesce a separarle dal resto
+del gruppo. Il vero problema però emerge nelle posizioni successive: le variabili $X_3$–$X_{12}$
+si contendono le posizioni 3–12 in modo fortemente caotico, con SD molto elevata. Per un
+analista reale che non conosce la verità e selezionasse le prime $k = 5$ variabili, il set
+selezionato cambierebbe sostanzialmente ad ogni esecuzione: al posto di rumore ordinato
+troverebbe rumore diverso ogni volta. Questo è il danno concreto dell'instabilità: non
+necessariamente perdere $X_1$, ma non poter sapere *quali* variabili di corredo sono
+affidabili.
 
 ---
 
@@ -417,8 +416,8 @@ su $Y$. Il loro segnale è un puro riflesso della correlazione con $X_1$, e qual
 
 Confrontiamo i tre indici sugli stessi dati AR(1), normalizzando i valori tra 0 e 1.
 Si ricordi che la Conditional Importance è calcolata tramite `cforest`, che usa un algoritmo
-di splitting diverso (conditional inference), quindi il confronto è tra approcci differenti,
-non solo tra metriche diverse sullo stesso modello.
+di splitting diverso (conditional inference trees), quindi il confronto è tra approcci
+differenti, non solo tra metriche diverse sullo stesso modello.
 
 ```{r exp3-models, cache=TRUE}
 # randomForest: MDI e Permutation
@@ -473,7 +472,7 @@ ggplot(imp_comparison,
   facet_wrap(~ Metodo, ncol = 1) +
   labs(
     title    = "Confronto tra indici di importanza",
-    subtitle = paste0("Solo X1 è causale — dati AR(1) con \u03c1=", rho),
+    subtitle = paste0("Solo X1 \u00e8 causale \u2014 dati AR(1) con \u03c1=", rho),
     x = NULL, y = "Importanza normalizzata [0, 1]"
   ) +
   theme(
@@ -557,8 +556,8 @@ ggplot(stab_df, aes(x = Variable, y = Prob, fill = Selected, color = Causale)) +
   scale_y_continuous(limits = c(0, 1.05), labels = percent_format(accuracy = 1)) +
   labs(
     title    = "Stability Selection con LASSO",
-    subtitle = "Probabilità di selezione su 100 sotto-campioni — il bordo scuro indica la variabile causale X1",
-    x = NULL, y = "Probabilità di selezione"
+    subtitle = "Probabilit\u00e0 di selezione su 100 sotto-campioni \u2014 il bordo scuro indica la variabile causale X1",
+    x = NULL, y = "Probabilit\u00e0 di selezione"
   )
 ```
 
@@ -583,22 +582,28 @@ per ogni metodo:
 - **Recall** = quante delle variabili causali vengono trovate?
 
 Il dataset ha $p = 30$ predittori in **3 blocchi da 10**, con correlazione intra-blocco
-$\rho = 0.80$ e correlazione inter-blocco nulla. Le variabili causali sono $X_1$, $X_{11}$,
-$X_{21}$ (la prima di ogni blocco), con $\beta = 2$.
+$\rho_{\text{intra}} = 0.80$ e correlazione inter-blocco $\rho_{\text{inter}} = 0.30$.
+La correlazione inter-blocco non nulla rende il problema realisticamente difficile: le
+variabili causali di blocchi diversi non sono più indipendenti tra loro.
+Le variabili causali sono $X_1$, $X_{11}$, $X_{21}$ (la prima di ogni blocco),
+con segnale debole $\beta = 1$ e $n = 100$ osservazioni.
 
 ```{r exp5-setup}
-p6         <- 30
-n6         <- 200
-rho6       <- 0.80
+p6   <- 30
+n6   <- 100           # n piccolo: il problema è difficile
+rho6_intra <- 0.80
+rho6_inter <- 0.30    # correlazione inter-blocco non nulla
+beta6_val  <- 1       # segnale debole
 true_vars6 <- c("X1", "X11", "X21")
-beta6      <- rep(0, p6)
-beta6[c(1, 11, 21)] <- 2
 
-# Matrice di correlazione a blocchi 3x10, correlazione inter-blocco = 0
-Sigma6 <- matrix(0, p6, p6)
+beta6 <- rep(0, p6)
+beta6[c(1, 11, 21)] <- beta6_val
+
+# Matrice di correlazione a blocchi con correlazione inter-blocco
+Sigma6 <- matrix(rho6_inter, p6, p6)          # base: rho_inter ovunque
 for (b in 0:2) {
   idx <- (b * 10 + 1):((b + 1) * 10)
-  Sigma6[idx, idx] <- rho6
+  Sigma6[idx, idx] <- rho6_intra              # intra-blocco più alta
 }
 diag(Sigma6) <- 1
 
@@ -632,7 +637,7 @@ pr_results6 <- lapply(seq_len(n_rep6), function(i) {
 })
 pr_df6 <- do.call(rbind, pr_results6)
 
-# Stampa medie e SD per verifica numerica
+# Verifica numerica: medie e SD su 40 run
 cat("Medie su 40 run:\n")
 print(round(colMeans(pr_df6[, -1]), 3))
 cat("\nDeviazioni standard:\n")
@@ -658,15 +663,19 @@ ggplot(pr_long6, aes(x = Metodo, y = value, fill = Metodo)) +
   labs(
     title    = "Precision e Recall su 40 run indipendenti",
     subtitle = paste0("3 variabili causali su ", p6,
-                      ", struttura a blocchi con \u03c1 = ", rho6),
+                      " — blocchi \u03c1=", rho6_intra,
+                      ", inter-blocco \u03c1=", rho6_inter,
+                      ", \u03b2=", beta6_val, ", n=", n6),
     x = NULL, y = NULL
   )
 ```
 
-**Interpretazione:** La Permutation Importance mostra precision e recall sistematicamente
-più alte della MDI. La MDI, distorta dalla correlazione intra-blocco, seleziona spesso
-variabili dello stesso blocco al posto di quelle causali (es. $X_2$ invece di $X_1$).
-La distribuzione più compatta della Permutation indica anche maggiore stabilità tra run.
+**Interpretazione:** Con segnale debole, $n$ piccolo e correlazione sia intra- che inter-blocco,
+la differenza tra MDI e Permutation Importance emerge chiaramente sia in precision che in recall.
+La MDI, distorta dalla correlazione intra-blocco, seleziona spesso variabili rumore dello stesso
+blocco al posto di quelle causali (es. $X_2$ invece di $X_1$). La Permutation Importance è meno
+distorta e mostra distribuzioni sia più alte che più compatte — indicatore di maggiore
+accuratezza *e* maggiore stabilità tra run.
 
 ---
 
@@ -725,7 +734,7 @@ ggplot(shap_bee, aes(x = SHAP, y = Variable, color = FeatVal_sc)) +
   scale_color_gradient(low = "#457B9D", high = "#E63946",
                        name = "Valore feature\n(basso \u2192 alto)") +
   labs(
-    title    = "SHAP Beeswarm Plot — Random Forest su dati AR(1)",
+    title    = "SHAP Beeswarm Plot \u2014 Random Forest su dati AR(1)",
     subtitle = "Ogni punto = un'osservazione | colore = valore della feature | posizione x = impatto sulla previsione",
     x = "Valore SHAP (impatto sulla previsione)", y = NULL
   ) +
@@ -753,7 +762,7 @@ ggplot(imp_comp, aes(x = Variable, y = Importanza, fill = Metodo)) +
   scale_y_continuous(limits = c(0, 1.1), expand = c(0, 0)) +
   labs(
     title    = "SHAP vs MDI vs Permutation (normalizzate)",
-    subtitle = paste0("Solo X1 è causale — dati AR(1) con \u03c1=", rho),
+    subtitle = paste0("Solo X1 \u00e8 causale \u2014 dati AR(1) con \u03c1=", rho),
     x = NULL, y = "Importanza normalizzata [0, 1]", fill = NULL
   )
 ```
@@ -776,8 +785,10 @@ molto inferiore al numero di variabili $p$. Questo aggrava tutti i problemi vist
 con pochi dati, il bias della MDI è amplificato e la varianza delle stime di importanza cresce.
 
 Fissiamo $p = 15$ predittori con struttura AR(1) a $\rho = 0.70$ e 3 variabili causali
-($X_1$, $X_6$, $X_{11}$), e facciamo variare $n$ da 50 a 1500. Per ogni valore di $n$,
-ripetiamo 30 volte e misuriamo la precision media del top-3. La banda rappresenta $\pm 1$ SD.
+($X_1$, $X_6$, $X_{11}$), con $\beta = 2$, e facciamo variare $n$ da 50 a 1500. Per ogni
+valore di $n$ ripetiamo 50 volte e misuriamo la precision media del top-3. La banda
+rappresenta $\pm 1$ SD. Usiamo 50 ripetizioni (invece di 30) per stabilizzare le stime
+nei regimi a $n$ piccolo, dove la variabilità è più alta.
 
 ```{r exp7-setup}
 p8    <- 15
@@ -787,7 +798,7 @@ beta8 <- rep(0, p8)
 beta8[c(1, 6, 11)] <- 2
 Sigma8  <- toeplitz(rho8^(0:(p8 - 1)))
 n_vals8 <- c(50, 100, 200, 400, 800, 1500)
-n_rep8  <- 30
+n_rep8  <- 50   # aumentato da 30 per stabilizzare le stime a n piccolo
 ```
 
 ```{r exp7-simulation, cache=TRUE}
@@ -829,33 +840,32 @@ ggplot(res8_df, aes(x = n, y = Precision, color = Metodo, group = Metodo)) +
   labs(
     title    = "Precision del top-3 al variare di n",
     subtitle = paste0("p = ", p8, ", AR(1) \u03c1 = ", rho8,
-                      ", 3 variabili causali — media \u00b1 SD su ",
+                      ", 3 variabili causali \u2014 media \u00b1 SD su ",
                       n_rep8, " run"),
     x = "Dimensione del campione n (scala log)",
     y = "Precision media", color = NULL, fill = NULL
   )
 ```
 
-**Interpretazione:** Con $n$ piccolo entrambi i metodi sono inaffidabili, ma la MDI peggiora
-più rapidamente perché il suo bias sistematico si somma alla varianza da campionamento.
-La Permutation Importance raggiunge una precision soddisfacente già intorno a $n = 200$,
-mentre la MDI richiede campioni più grandi. Questo è particolarmente critico in genomica,
-dove $n$ è spesso fissato dai costi sperimentali.
+**Interpretazione:** La Permutation Importance è sistematicamente superiore alla MDI a parità
+di $n$, con un divario massimo nelle regioni a campione piccolo dove il bias MDI si somma alla
+varianza da campionamento. Entrambi i metodi convergono verso la precisione massima per $n$
+grandi, ma la Permutation vi arriva prima. Questo è particolarmente critico in genomica,
+dove $n$ è spesso fissato dai costi sperimentali e non può essere aumentato arbitrariamente.
 
 ---
 
-# Esperimento 8 — Dati ad alta dimensionalità (p ≫ n)
+# Esperimento 8 — Dati ad alta dimensionalità (p $\gg$ n)
 
 ## Il caso genomico: molte più variabili che osservazioni
 
 In genomica è comune avere $p \gg n$: migliaia di geni misurati su poche decine di pazienti.
-In questo regime i problemi visti finora si esasperano: la MDI diventa quasi casuale perché
-centinaia di variabili rumore competono con i segnali reali, e l'instabilità tra run esplode.
+In questo regime i problemi visti finora si esasperano: la MDI diventa instabile perché
+centinaia di variabili rumore competono con i segnali reali su pochissimi dati.
 
 Simuliamo $p = 300$ predittori **incorrelati** con $n = 80$ osservazioni e 5 variabili causali
 sparse, con segnale moderato ($\beta = 1.5$). Il caso incorrelato è il più favorevole possibile
-per la MDI; nonostante ciò, con un segnale/rumore limitato e $p \gg n$, l'instabilità è
-comunque rilevante.
+per la MDI; con segnale/rumore limitato e $p \gg n$ l'instabilità è comunque rilevante.
 
 ```{r exp8-setup, cache=TRUE}
 p9    <- 300
@@ -867,7 +877,7 @@ set.seed(900)
 X9 <- matrix(rnorm(n9 * p9), nrow = n9, ncol = p9)
 colnames(X9) <- paste0("X", 1:p9)
 beta9 <- rep(0, p9)
-beta9[true9] <- 1.5          # segnale moderato (era 3 nella versione precedente)
+beta9[true9] <- 1.5
 Y9    <- as.numeric(X9 %*% beta9 + rnorm(n9))
 df9   <- data.frame(Y = Y9, X9)
 
@@ -880,17 +890,22 @@ top_k9 <- 20
 top9a  <- names(rank9a)[1:top_k9]
 top9b  <- names(rank9b)[1:top_k9]
 
-cat(sprintf("Overlap top-%d tra i due run: %d/%d (%.0f%%)\n",
-            top_k9, length(intersect(top9a, top9b)), top_k9,
-            100 * length(intersect(top9a, top9b)) / top_k9))
-cat(sprintf("Variabili causali in top-%d: Run1 = %d/5 | Run2 = %d/5\n",
-            top_k9,
-            sum(top9a %in% true_names9),
-            sum(top9b %in% true_names9)))
+# Statistiche di concordanza tra i due run
+overlap_n <- length(intersect(top9a, top9b))
+jaccard   <- overlap_n / length(union(top9a, top9b))
+recall9a  <- sum(top9a %in% true_names9)
+recall9b  <- sum(top9b %in% true_names9)
 
-# Indice di Jaccard tra i due top-20
-jaccard <- length(intersect(top9a, top9b)) / length(union(top9a, top9b))
+cat(sprintf("Overlap top-%d tra i due run: %d/%d (%.0f%%)\n",
+            top_k9, overlap_n, top_k9,
+            100 * overlap_n / top_k9))
 cat(sprintf("Jaccard top-%d: %.2f\n", top_k9, jaccard))
+cat(sprintf("Variabili causali in top-%d: Run1 = %d/5 | Run2 = %d/5\n",
+            top_k9, recall9a, recall9b))
+cat(sprintf(
+  "\nNota: le variabili causali sono recuperate, ma sono accompagnate da %d (Run1) e %d (Run2)\n",
+  top_k9 - recall9a, top_k9 - recall9b))
+cat("variabili rumore diverse nei due run. Un analista ignaro non sa quali sono le causali.\n")
 ```
 
 ```{r exp8-plot, fig.width=10, fig.height=5}
@@ -913,22 +928,24 @@ ggplot(plot9_df, aes(x = Variable, y = MDI, fill = Run, alpha = Causale)) +
   scale_alpha_manual(values = c("TRUE" = 1, "FALSE" = 0.45), guide = "none") +
   labs(
     title    = paste0("MDI nelle top-40 variabili (p=", p9, ", n=", n9, ", \u03b2=1.5)"),
-    subtitle = paste0("Variabili causali a piena opacità — overlap top-",
-                      top_k9, ": ", length(intersect(top9a, top9b)), "/", top_k9,
-                      " | Causali recuperate: Run1=",
-                      sum(top9a %in% true_names9), "/5",
-                      ", Run2=", sum(top9b %in% true_names9), "/5",
-                      " | Jaccard=", round(jaccard, 2)),
+    subtitle = paste0("Variabili causali a piena opacit\u00e0 \u2014 overlap top-",
+                      top_k9, ": ", overlap_n, "/", top_k9,
+                      " | Jaccard=", round(jaccard, 2),
+                      " | Causali: Run1=", recall9a, "/5, Run2=", recall9b, "/5"),
     x = NULL, y = "MDI (IncNodePurity)", fill = "Esecuzione"
   ) +
   theme(axis.text.x = element_text(angle = 60, hjust = 1, size = 7))
 ```
 
-**Interpretazione:** Con $p \gg n$ e segnale moderato, il ranking MDI mostra instabilità
-concreta tra run indipendenti. L'indice di Jaccard tra le top-20 quantifica questa instabilità:
-valori bassi indicano che i due run concordano su poche variabili. Le variabili causali (barre
-opache) faticano a emergere dal rumore delle 295 variabili irrilevanti.
-In questo regime la Stability Selection e la Conditional Importance diventano essenziali.
+**Interpretazione:** Con $p \gg n$ e segnale moderato si osservano due effetti distinti.
+Da un lato, le 5 variabili causali (barre a piena opacità) vengono recuperate in entrambi i
+run grazie al segnale $\beta = 1.5$ — il che è il caso più favorevole, con predittori incorrelati.
+Dall'altro, i $15$ posti rimanenti nella top-20 sono occupati da variabili rumore diverse nei due
+run (Jaccard $\approx 0.74$): un analista che non conosce la verità e lavora con la top-20 si
+troverebbe con un insieme contaminato da 15 falsi positivi, e l'insieme stesso cambierebbe ad
+ogni esecuzione. In presenza di correlazione tra predittori — come in dati genomici reali — la
+situazione peggiorerebbe ulteriormente, rendendo Stability Selection e Conditional Importance
+essenziali.
 
 ---
 
@@ -983,7 +1000,7 @@ ggplot(boruta_plot_df,
   geom_col(width = 0.65, alpha = 0.9) +
   geom_hline(yintercept = shadow_thr, linetype = "dashed",
              color = "#E63946", linewidth = 1) +
-  annotate("text", x = p - 1, y = shadow_thr + 0.4,
+  annotate("text", x = p - 1, y = shadow_thr + 0.04,
            label = "Media shadowMax", color = "#E63946", size = 3.5) +
   scale_fill_manual(values = pal_boruta) +
   scale_color_manual(values = c("TRUE" = "#B5002A", "FALSE" = "transparent"),
@@ -996,35 +1013,36 @@ ggplot(boruta_plot_df,
 ```
 
 **Interpretazione:** $X_1$ supera sistematicamente la soglia shadowMax e viene confermata.
-Le variabili correlate ($X_2$, $X_3$, …) possono anch'esse risultare confermate o tentative
-in presenza di alta correlazione (come accade qui con $\rho=0.95$): questo non è un difetto
-di Boruta, ma riflette il fatto che variabili fortemente correlate con la causa portano
-informazione predittiva reale, anche se non causale. In tal caso Boruta non distingue causa
-da proxy correlato — è necessario complementarlo con la Conditional Importance o la
-Stability Selection quando l'obiettivo è l'identificazione causale. **La tabella riepilogativa
-riflette questa distinzione.**
+Le variabili correlate ($X_2$, $X_3$, …) vengono anch'esse confermate con $\rho = 0.95$:
+questo non è un difetto di Boruta, ma riflette il fatto che variabili fortemente correlate
+con la causa portano informazione predittiva reale, anche se non causale. Boruta non distingue
+causa da proxy correlato — è necessario complementarlo con la Conditional Importance o la
+Stability Selection quando l'obiettivo è l'identificazione causale. La tabella riepilogativa
+riflette questa distinzione.
 
 ---
 
 # Riepilogo e confronto sintetico
 
 ```{r summary-table}
-# Identificazione corretta = X1 selezionata E almeno qualche specifità
 X1_MDI_top   <- which.max(imp_mdi_main) == 1
 X1_MDA_top   <- which.max(imp_mda_main) == 1
 X1_COND_top  <- which.max(imp_cond_main[paste0("X", 1:p)]) == 1
 X1_STAB_ok   <- stab_df$Prob[1] >= 0.75 && all(stab_df$Prob[-1] < 0.75)
 X1_SHAP_top  <- which.max(shap_mean_imp) == 1
 
-# Boruta: X1 confermata (recall), ma valutare quante altre sono confermate (precision)
+# Boruta: X1 confermata? quante altre variabili confermate?
 X1_boruta_confirmed <- boruta_res$finalDecision["X1"] == "Confirmed"
 n_boruta_confirmed  <- sum(boruta_res$finalDecision == "Confirmed")
 boruta_label <- if (X1_boruta_confirmed) {
-  if (n_boruta_confirmed == 1) "Sì \u2714 (solo X1)" else
-    paste0("Sì \u2714 (+ ", n_boruta_confirmed - 1, " proxy)")
+  if (n_boruta_confirmed == 1) "S\u00ec \u2714 (solo X1)" else
+    paste0("S\u00ec \u2714 (+ ", n_boruta_confirmed - 1, " proxy)")
 } else "No \u2718"
 
-tick_cross <- function(x) ifelse(x, "Sì \u2714", "No \u2718")
+# MDI: identificata, ma instabile tra run (nota esplicita)
+mdi_label <- if (X1_MDI_top) "S\u00ec \u2714 (instabile)" else "No \u2718"
+
+tick_cross <- function(x) ifelse(x, "S\u00ec \u2714", "No \u2718")
 
 summary_df <- data.frame(
   Metodo = c(
@@ -1035,31 +1053,35 @@ summary_df <- data.frame(
     "SHAP (fastshap)",
     "Boruta"
   ),
-  Bias_card   = c("Sì", "No", "No", "No", "No", "No"),
-  Instabile   = c("Sì", "Parzialmente", "No", "No", "Parzialmente", "No"),
+  Bias_card   = c("S\u00ec", "No", "No", "No", "No", "No"),
+  Instabile   = c("S\u00ec", "Parzialmente", "No", "No", "Parzialmente", "No"),
   X1_corretta = c(
-    tick_cross(X1_MDI_top),
+    mdi_label,
     tick_cross(X1_MDA_top),
     tick_cross(X1_COND_top),
     tick_cross(X1_STAB_ok),
     tick_cross(X1_SHAP_top),
     boruta_label
   ),
-  Garanzia_FP  = c("No", "No", "No", "Sì (PFER)", "No", "No"),
-  Interp_obs   = c("No", "No", "No", "No", "Sì", "No"),
-  Costo        = c("Basso", "Medio", "Alto*", "Medio", "Alto", "Medio")
+  Garanzia_FP  = c("No", "No", "No", "S\u00ec (PFER)", "No", "No"),
+  Interp_obs   = c("No", "No", "No", "No", "S\u00ec", "No"),
+  Costo        = c("Basso", "Medio", "Alto*", "Medio", "Alto**", "Medio")
 )
 
 knitr::kable(
   summary_df,
-  col.names = c("Metodo", "Bias cardinalità",
+  col.names = c("Metodo", "Bias cardinalit\u00e0",
                 "Instabile con correlazione",
                 "X1 identificata",
                 "Garanzia falsi positivi",
                 "Interpret. per osservazione",
                 "Costo computazionale"),
   align   = "lcccccc",
-  caption = "Confronto tra metodi di variable importance. *cforest usa un algoritmo diverso da randomForest (conditional inference trees), non solo un indice diverso."
+  caption = paste0(
+    "Confronto tra metodi di variable importance. ",
+    "*cforest usa conditional inference trees, algoritmo di splitting diverso da randomForest. ",
+    "**fastshap \u00e8 un'approssimazione Monte Carlo; per stime esatte usare treeshap o shapviz+ranger."
+  )
 )
 ```
 
