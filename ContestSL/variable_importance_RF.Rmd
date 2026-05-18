@@ -524,7 +524,7 @@ ggplot(imp_comparison,
 | Metodo | Comportamento osservato |
 |--------|------------------------|
 | **MDI** | Distribuisce l'importanza sul blocco correlato: $X_2$ è a circa 0.6, $X_3$ e $X_4$ intorno a 0.3. Il profilo scende rapidamente dopo $X_4$ |
-| **Permutation** | Il profilo è simile alla MDI per le prime variabili ($X_2 \approx 0.6$, $X_3$–$X_4 \approx 0.3$), ma distribuisce importanza residua su un numero maggiore di variabili lontane ($X_5$–$X_{12}$ quasi tutte con barre visibili). Il vantaggio della Permutation rispetto alla MDI su dati con correlazione non emerge chiaramente in questa singola esecuzione — lo vedremo in modo quantitativo nell'Esperimento 5 (precision e recall su 40 run) |
+| **Permutation** | Il profilo è simile alla MDI per le prime variabili ($X_2 \approx 0.6$, $X_3$–$X_4 \approx 0.3$), ma distribuisce importanza residua su un numero maggiore di variabili lontane ($X_5$–$X_{12}$ tutte con barre visibili). Il vantaggio della Permutation rispetto alla MDI su dati con correlazione non emerge chiaramente in questa singola esecuzione — lo vedremo in modo quantitativo nell'Esperimento 5 (precision e recall su 40 run) |
 | **Conditional** | Concentra quasi tutta l'importanza su $X_1$ ($\approx 0.95$); $X_2$ scende a $\approx 0.35$, tutto il resto cade vicino a zero. È l'unico metodo che isola la variabile causale in modo netto in questa singola esecuzione |
 
 ---
@@ -598,10 +598,19 @@ ggplot(stab_df, aes(x = Variable, y = Prob, fill = Selected, color = Causale)) +
   )
 ```
 
-**Risultato:** $X_1$ raggiunge $\hat{\Pi}_1 \approx 1.0$: viene selezionata in (quasi) tutti i
-sotto-campioni. Tutte le altre variabili, pur essendo correlate con $X_1$, restano ampiamente
-sotto la soglia: il loro segnale scompare non appena si cambia il campione, confermando che
-si trattava solo di un artefatto della correlazione.
+**Risultato:** $X_1$ raggiunge $\hat{\Pi}_1 = 0.97$: viene selezionata nel 97% dei sotto-campioni,
+ben al di sopra della soglia $\pi_{\text{thr}} = 0.75$. Tutte le altre variabili restano sotto
+il 35% — con $X_4$ e $X_{12}$ che mostrano le probabilità più alte tra le variabili rumore
+(rispettivamente ~32% e ~31%) senza avvicinarsi alla soglia. Il loro segnale scompare non
+appena si cambia il campione, confermando che si trattava solo di un artefatto della
+correlazione con $X_1$.
+
+**Nota sull'output di `stabs`:** il valore `PFER (*): 0.758` riportato nell'output non è
+il numero di falsi positivi tra le variabili *selezionate*: la riga con `(*)` indica il numero
+atteso di variabili a *bassa* probabilità di selezione erroneamente incluse, una metrica
+interna al pacchetto. Il bound formale sui falsi positivi tra le variabili selezionate è
+controllato dal parametro `PFER = 1` specificato nella chiamata, che garantisce
+$E[|\hat{S}^{\text{stable}} \cap S^c|] \leq 1$.
 
 La Stability Selection produce una selezione **univoca e corretta**, con garanzia formale
 sul numero di falsi positivi.
@@ -709,10 +718,21 @@ ggplot(pr_long6, aes(x = Metodo, y = value, fill = Metodo)) +
 
 **Interpretazione:** Con segnale debole, $n$ piccolo e correlazione sia intra- che inter-blocco,
 la differenza tra MDI e Permutation Importance emerge chiaramente sia in precision che in recall.
-La MDI, distorta dalla correlazione intra-blocco, seleziona spesso variabili rumore dello stesso
-blocco al posto di quelle causali (es. $X_2$ invece di $X_1$). La Permutation Importance è meno
-distorta e mostra distribuzioni sia più alte che più compatte — indicatore di maggiore
-accuratezza *e* maggiore stabilità tra run.
+
+La MDI mostra SD=0 su tutti i 40 run: non è instabile, è **sistematicamente bloccata**
+su una selezione errata. I punti si concentrano su soli due valori discreti — 33% e 67%
+di 3 variabili causali, cioè 1 o 2 causali trovate su 3 — e il risultato non cambia mai
+tra un run e l'altro. Il bias da cardinalità e dalla correlazione intra-blocco porta MDI
+a selezionare ripetutamente le stesse variabili rumore del blocco (es. $X_2$ al posto di
+$X_1$), producendo errori sistematici e non casuali.
+
+La Permutation Importance ha mediana più alta (~75% vs ~67% di MDI) e variabilità
+reale tra run (SD=0.146): in molte esecuzioni riesce a trovare tutte e 3 le causali (100%),
+in altre ne manca una. Questo trade-off — più accurata in media, ma con variabilità
+residua — è il comportamento atteso di un metodo meno distorto ma non esente da errori
+con $n$ piccolo. Il rimando promesso nell'Esperimento 3 è confermato: su questa
+singola esecuzione il vantaggio della Permutation non era visibile, ma su 40 run il
+divario sistematico in precision e recall è netto.
 
 ---
 
