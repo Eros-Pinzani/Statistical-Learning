@@ -747,7 +747,9 @@ previsioni, calcolato su tutte le possibili coalizioni di variabili presenti o a
 
 A differenza di MDI e Permutation Importance, SHAP produce un **valore per ogni singola
 osservazione**: si vede non solo *quanto* conta una variabile in media, ma *come* influenza
-ogni singola previsione e *in che direzione*.
+ogni singola previsione e *in che direzione*. Vedremo inoltre che su dati fortemente correlati
+SHAP tende ad assegnare importanza residua inferiore alla Permutation Importance alle variabili
+non causali, avvicinandosi al comportamento della Conditional Importance.
 
 **Nota tecnica:** qui usiamo `fastshap`, che stima i valori SHAP tramite campionamento
 Monte Carlo (`nsim = 100`). È un'approssimazione: con molte variabili correlate o con
@@ -824,12 +826,33 @@ ggplot(imp_comp, aes(x = Variable, y = Importanza, fill = Metodo)) +
   )
 ```
 
-**Interpretazione:** I valori SHAP si comportano in modo simile alla Permutation Importance:
-$X_1$ domina chiaramente, mentre le variabili correlate ricevono importanza residua decrescente.
-Il beeswarm aggiunge però un'informazione cruciale: valori alti di $X_1$ (rosso) producono
-SHAP positivi — aumentano la previsione — e valori bassi (blu) la abbassano. Questo è coerente
-con il coefficiente positivo $\beta_1 = 0.8$ del modello generativo. Per le variabili rumore,
-i punti sono sparsi simmetricamente attorno allo zero: nessuna direzione d'effetto stabile.
+**Interpretazione del grafico di confronto (normalizzato):**
+Contrariamente a quanto ci si potrebbe aspettare, SHAP non si comporta in modo simile alla
+Permutation Importance sulle variabili correlate. Dal grafico si vede chiaramente che SHAP
+assegna importanza residua *inferiore* alla Permutation su quasi tutte le variabili non causali
+($X_2$: SHAP $\approx$ 0.48 vs Permutation $\approx$ 0.62; $X_4$: SHAP $\approx$ 0.20 vs
+Permutation $\approx$ 0.35; $X_{10}$: SHAP $\approx$ 0.02 vs Permutation $\approx$ 0.25).
+SHAP si avvicina quindi di più alla Conditional Importance nel penalizzare i proxy correlati,
+pur senza annullarli completamente. Parte di questa differenza potrebbe essere attribuibile
+all'approssimazione Monte Carlo di `fastshap` con `nsim = 100` su dati fortemente correlati
+($\rho = 0.95$): stime esatte potrebbero ridurre ulteriormente l'importanza residua delle
+variabili correlate.
+
+**Interpretazione del beeswarm:**
+Il valore aggiunto di SHAP rispetto agli indici globali è la direzione dell'effetto per ogni
+osservazione. Per $X_1$: valori alti (rosso) producono SHAP positivi — aumentano la previsione
+— e valori bassi (blu) la abbassano. Questo è coerente con il coefficiente positivo
+$\beta_1 = 0.8$ del modello generativo.
+
+Per $X_2$, essendo correlata con $X_1$ a $\rho = 0.95$, si osserva lo stesso pattern
+direzionale: rosso a destra, blu a sinistra. Questo non indica che $X_2$ ha un effetto causale,
+ma che il modello le ha trasferito parte dell'importanza di $X_1$ attraverso la correlazione —
+esattamente il problema discusso negli esperimenti precedenti, ora visibile a livello di singola
+osservazione.
+
+Per le variabili lontane da $X_1$ nella catena AR(1) ($X_8$–$X_{12}$), i punti sono distribuiti
+in modo molto più simmetrico attorno allo zero: la direzione d'effetto non è stabile, confermando
+che la loro importanza è quasi interamente rumore.
 
 ---
 
@@ -905,10 +928,16 @@ ggplot(res8_df, aes(x = n, y = Precision, color = Metodo, group = Metodo)) +
 ```
 
 **Interpretazione:** La Permutation Importance è sistematicamente superiore alla MDI a parità
-di $n$, con un divario massimo nelle regioni a campione piccolo dove il bias MDI si somma alla
-varianza da campionamento. Entrambi i metodi convergono verso la precisione massima per $n$
-grandi, ma la Permutation vi arriva prima. Questo è particolarmente critico in genomica,
-dove $n$ è spesso fissato dai costi sperimentali e non può essere aumentato arbitrariamente.
+di $n$, con un divario massimo a campione piccolo. A $n=50$ la differenza è di circa 17 punti
+percentuali (MDI ~63%, Permutation ~80%): il bias MDI si somma alla varianza da campionamento,
+producendo un doppio svantaggio. Entrambi i metodi hanno comunque bande ampie a $n=50$,
+segno che nessuno è affidabile con così pochi dati.
+
+Con $n=100$ la Permutation raggiunge già ~100% di precision (banda quasi nulla), mentre la MDI
+impiega fino a $n=200$ per stabilizzarsi. Questo divario di un fattore 2 nel campione necessario
+è particolarmente critico in genomica, dove $n$ è spesso fissato dai costi sperimentali: con
+$n=100$ pazienti la Permutation dà già risultati affidabili, mentre la MDI ne richiederebbe il
+doppio per le stesse garanzie.
 
 ---
 
@@ -995,13 +1024,23 @@ ggplot(plot9_df, aes(x = Variable, y = MDI, fill = Run, alpha = Causale)) +
 ```
 
 **Interpretazione:** Con $p \gg n$ e segnale moderato si osservano due effetti distinti.
-Da un lato, le 5 variabili causali (barre a piena opacità) vengono recuperate in entrambi i
-run grazie al segnale $\beta = 1.5$ — il che è il caso più favorevole, con predittori incorrelati.
-Dall'altro, i $15$ posti rimanenti nella top-20 sono occupati da variabili rumore diverse nei due
-run (Jaccard $\approx 0.74$): un analista che non conosce la verità e lavora con la top-20 si
-troverebbe con un insieme contaminato da 15 falsi positivi, e l'insieme stesso cambierebbe ad
-ogni esecuzione. In presenza di correlazione tra predittori — come in dati genomici reali — la
-situazione peggiorerebbe ulteriormente, rendendo Stability Selection e Conditional Importance
+
+Da un lato, le 5 variabili causali (barre a piena opacità nel grafico) vengono recuperate in
+entrambi i run — recall 5/5 per entrambi. Questo è il caso più favorevole possibile: predittori
+incorrelati con $\beta = 1.5$ abbastanza grande da far emergere il segnale. Si noti che X120,
+pur rientrando nella top-20 di entrambi i run (confermato dal recall), non appare tra le prime
+posizioni nel grafico: il grafico mostra le top-40 ordinate per importanza MDI del Run 1, quindi
+X120 compare più a destra con barre semi-trasparenti perché il Run 1 le ha assegnato un rango
+leggermente più basso pur includendola nella top-20.
+
+Dall'altro lato, i 15 posti rimanenti nella top-20 sono occupati da variabili rumore diverse nei
+due run (Jaccard = `r round(jaccard, 2)`): un analista che non conosce la verità e lavora con
+la top-20 si troverebbe con un insieme contaminato da 15 falsi positivi, e l'insieme stesso
+cambierebbe ad ogni esecuzione — 3 variabili diverse tra i due run (overlap 17/20).
+
+In presenza di correlazione tra predittori — come in dati genomici reali — la situazione
+peggiorerebbe su entrambi i fronti: le causali stenterebbero ad emergere e l'instabilità dei
+falsi positivi aumenterebbe ulteriormente, rendendo Stability Selection e Conditional Importance
 essenziali.
 
 ---
