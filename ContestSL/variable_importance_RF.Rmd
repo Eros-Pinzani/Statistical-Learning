@@ -102,6 +102,12 @@ $$\text{MDA}(X_j) = \frac{1}{B} \sum_{b=1}^{B}
 Se $X_j$ è irrilevante, rimescolarla non cambia le previsioni $\Rightarrow$ $\text{MDA}(X_j) \approx 0$.
 Se è informativa, rimescolarla peggiora il modello $\Rightarrow$ valore alto.
 
+**Limite residuo:** la MDA riduce ma non elimina il bias da cardinalità. Rimescolare una
+variabile continua con molti valori distinti produce coppie (osservazione, valore permutato)
+che non esistono nel dataset originale, perturbando artificialmente le previsioni OOB. Con
+$n$ grande e variabili ad alta cardinalità, questo effetto può produrre valori MDA non
+trascurabili anche per predittori completamente irrilevanti, come mostreremo nell'Esperimento 1.
+
 ## Il bias della MDI: perché favorisce certe variabili
 
 Supponiamo di avere una variabile completamente casuale, priva di qualsiasi legame con $Y$.
@@ -281,6 +287,10 @@ imp_df <- data.frame(
   MDI         = imp_mdi,
   Permutation = imp_mda
 )
+
+# Stampa valori numerici per verifica
+cat("Valori MDI:\n");         print(round(imp_mdi, 2))
+cat("\nValori Permutation:\n"); print(round(imp_mda, 2))
 ```
 
 ```{r exp1-plot, fig.width=10, fig.height=4.5}
@@ -307,12 +317,23 @@ p_perm <- make_bar(imp_df, "Permutation", "#457B9D", "Permutation Importance (%I
 ```
 
 **Interpretazione:**
-La MDI assegna importanza crescente man mano che la cardinalità aumenta. La variabile continua
-riceve un'importanza nettamente più alta di quella binaria, pur contenendo esattamente le stesse
-informazioni: nessuna. La Permutation Importance si comporta invece correttamente: rimescolare
-un predittore irrilevante non cambia le previsioni OOB. Si noti tuttavia che anche la Permutation
-mostra valori leggermente positivi per le variabili a cardinalità maggiore (X\_cat15, X\_cont):
-questo è normale variabilità campionaria, non un bias sistematico, e tende a zero al crescere di $n$.
+La MDI assegna importanza crescente man mano che la cardinalità aumenta: la variabile continua
+riceve un'importanza circa 5–7 volte più alta di quella binaria, pur contenendo esattamente le
+stesse informazioni — nessuna. Questo è il bias da cardinalità, strutturale e non eliminabile
+senza cambiare metodo.
+
+La Permutation Importance riduce ma **non elimina** il problema. I valori numerici mostrano che
+anche X\_cont e X\_cat15 ricevono importanza Permutation non trascurabile (nell'ordine di 5–10
+%IncMSE), ben superiore ai valori attesi di zero per un predittore irrilevante. Il meccanismo è
+lo stesso descritto da Strobl et al. (2007): rimescolare una variabile continua con molti valori
+distinti crea coppie (osservazione, valore permutato) che non esistono nel dataset originale,
+perturbando le previsioni OOB in modo artificiale. La Permutation è quindi *meno* distorta della
+MDI, ma non è immune — e su dati ad alta cardinalità con $n$ grande la distorsione residua può
+essere tutt'altro che trascurabile.
+
+La soluzione corretta è la **Conditional Importance** (`cforest`), che rimescola ogni variabile
+solo condizionatamente alle variabili correlate, eliminando le combinazioni impossibili. Lo
+vedremo nell'Esperimento 3.
 
 ---
 
@@ -373,24 +394,40 @@ print(t(rank_summary))
 rank_long <- as.data.frame(rank_matrix) %>%
   tibble::rownames_to_column("Variable") %>%
   pivot_longer(-Variable, names_to = "Run", values_to = "Rank") %>%
-  mutate(
-    IsX1     = Variable == "X1",
-    Variable = factor(Variable, levels = paste0("X", 1:p))
-  )
+  mutate(Variable = factor(Variable, levels = paste0("X", 1:p)))
 
-ggplot(rank_long,
-       aes(x = fct_reorder(Variable, Rank, .fun = median), y = Rank, fill = IsX1)) +
-  geom_boxplot(alpha = 0.85, outlier.size = 1.2, width = 0.6) +
-  scale_y_reverse(breaks = 1:p) +
-  scale_fill_manual(
-    values = c("TRUE" = "#E63946", "FALSE" = "#A8DADC"),
-    labels = c("TRUE" = "X1 (causale)", "FALSE" = "Variabile rumore"),
-    name   = NULL
+# Ordine sull'asse x: variabili ordinate per rango mediano
+var_order <- rank_long %>%
+  group_by(Variable) %>%
+  summarise(med = median(Rank), .groups = "drop") %>%
+  arrange(med) %>%
+  pull(Variable) %>%
+  as.character()
+
+rank_long <- rank_long %>%
+  mutate(Variable = factor(as.character(Variable), levels = var_order))
+
+# Posizione x di X1 nell'ordine del grafico (per l'annotazione)
+x1_pos <- which(var_order == "X1")
+
+ggplot(rank_long, aes(x = Variable, y = Rank)) +
+  # Tutti i box in azzurro
+  geom_boxplot(fill = "#A8DADC", alpha = 0.85, outlier.size = 1.2, width = 0.6) +
+  # Sovrapponi il box di X1 in rosso con bordo marcato
+  geom_boxplot(
+    data      = dplyr::filter(rank_long, Variable == "X1"),
+    fill      = "#E63946", alpha = 0.9, width = 0.6,
+    color     = "#B5002A", linewidth = 1.2
   ) +
+  # Etichetta testuale sopra X1
+  annotate("text", x = x1_pos, y = 0.3,
+           label = "X1 (causale)", color = "#B5002A",
+           size = 3.2, fontface = "bold", vjust = 1) +
+  scale_y_reverse(breaks = 1:p) +
   labs(
-    title    = "Instabilità dei ranghi MDI su 30 run indipendenti",
+    title    = "Instabilit\u00e0 dei ranghi MDI su 30 run indipendenti",
     subtitle = paste0("n=", n, ", p=", p, " predittori, AR(1) con \u03c1=", rho,
-                      ", \u03b2\u2081=0.8 — solo X1 \u00e8 causale"),
+                      ", \u03b2\u2081=0.8 \u2014 solo X1 \u00e8 causale"),
     x = NULL, y = "Rango MDI (1 = pi\u00f9 importante)"
   )
 ```
@@ -486,9 +523,9 @@ ggplot(imp_comparison,
 
 | Metodo | Comportamento osservato |
 |--------|------------------------|
-| **MDI** | Distribuisce l'importanza su tutto il blocco correlato: $X_2$ e $X_3$ risultano quasi importanti quanto $X_1$ |
-| **Permutation** | $X_1$ emerge più chiaramente, ma le variabili correlate portano ancora importanza residua |
-| **Conditional** | Concentra l'importanza su $X_1$; le variabili correlate crollano vicino a zero, perché il metodo rimuove il contributo già spiegato dalle variabili correlate prima di valutare ciascuna |
+| **MDI** | Distribuisce l'importanza sul blocco correlato: $X_2$ è a circa 0.6, $X_3$ e $X_4$ intorno a 0.3. Il profilo scende rapidamente dopo $X_4$ |
+| **Permutation** | Il profilo è simile alla MDI per le prime variabili ($X_2 \approx 0.6$, $X_3$–$X_4 \approx 0.3$), ma distribuisce importanza residua su un numero maggiore di variabili lontane ($X_5$–$X_{12}$ quasi tutte con barre visibili). Il vantaggio della Permutation rispetto alla MDI su dati con correlazione non emerge chiaramente in questa singola esecuzione — lo vedremo in modo quantitativo nell'Esperimento 5 (precision e recall su 40 run) |
+| **Conditional** | Concentra quasi tutta l'importanza su $X_1$ ($\approx 0.95$); $X_2$ scende a $\approx 0.35$, tutto il resto cade vicino a zero. È l'unico metodo che isola la variabile causale in modo netto in questa singola esecuzione |
 
 ---
 
