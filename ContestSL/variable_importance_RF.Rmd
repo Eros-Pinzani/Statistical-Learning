@@ -208,6 +208,18 @@ tema_base <- theme_minimal(base_size = 12) +
   )
 theme_set(tema_base)
 
+# Palette unificata per tutti gli esperimenti
+COL_MDI         <- "#E63946"
+COL_MDA         <- "#F4A261"
+COL_CONDITIONAL <- "#2A9D8F"
+COL_NEUTRAL     <- "#E0E0E0"
+
+COL_MDI_DARK    <- "#9B0820"
+COL_MDA_DARK    <- "#B05D1A"
+COL_NEUTRAL_DARK <- "#9E9E9E"
+
+COL_EXPECTED    <- "#2D6A4F"
+
 set.seed(42)
 ```
 
@@ -285,23 +297,23 @@ annot_df <- data.frame(
 )
 
 # Palette
-pal_metodi <- c(MDI = "#E63946", Permutation = "#457B9D")
+pal_metodi <- c(MDI = COL_MDI, Permutation = COL_MDA)
 
 ggplot(imp_long,
        aes(x = Variable, y = Valore, fill = Metodo, group = Metodo)) +
   # Barre raggruppate
   geom_col(position = position_dodge(0.72), width = 0.65, alpha = 0.92) +
   # Linea "valore atteso corretto = 0"
-  geom_hline(yintercept = 0, color = "#2d6a4f", linewidth = 1) +
+  geom_hline(yintercept = 0, color = COL_EXPECTED, linewidth = 1) +
   # Etichetta della linea
   annotate("text", x = 4.35, y = 2.5,
-           label = "Atteso: 0", color = "#2d6a4f",
+           label = "Atteso: 0", color = COL_EXPECTED,
            size = 3, hjust = 0, fontface = "italic") +
   # Moltiplicatori sopra le barre MDI
   geom_text(data = annot_df,
             aes(x = x_dodge, y = y_top, label = label),
             inherit.aes = FALSE,
-            color = "#B5002A", fontface = "bold", size = 3.6, vjust = 0) +
+            color = COL_MDI_DARK, fontface = "bold", size = 3.6, vjust = 0) +
   scale_fill_manual(values = pal_metodi,
                     labels = c("MDI", "MDA")) +
   scale_y_continuous(expand = expansion(mult = c(0, 0.18))) +
@@ -328,7 +340,7 @@ cardinalità: tutte le variabili sono rumore, eppure la variabile continua risul
 importante della binaria. I moltiplicatori sopra le barre MDI (ad es. ×1, ×3.7, ×9.7, ×11)
 quantificano questa inflazione rispetto alla variabile binaria di riferimento.
 
-La MDA (barre blu, Permutation) è molto più vicina allo zero e fornisce una misura più
+La MDA (barre arancioni, Permutation) è molto più vicina allo zero e fornisce una misura più
 conservativa della rilevanza: permutare una variabile irrilevante dovrebbe lasciare
 invariate le prestazioni, quindi un valore vicino a zero è atteso. Tuttavia la Permutation
 non è completamente immune agli artefatti di cardinalità: variabili ad alta cardinalità
@@ -348,15 +360,16 @@ Importance tramite `cforest`), che vedremo nell'Esperimento 3.
 
 ## Setup della simulazione
 
-Creiamo un dataset con $p = 12$ variabili con struttura **AR(1)** a $\rho = 0.95$ — correlazione
-molto forte, in modo che le variabili vicine siano quasi indistinguibili dal punto di vista
-predittivo. Il segnale causale è deliberatamente debole:
+Creiamo un dataset con $p = 12$ variabili con struttura **AR(1)** a $\rho = 0.99$:
+correlazione estremamente alta, quindi variabili quasi indistinguibili dal punto di vista
+predittivo. Il segnale causale resta deliberatamente debole:
 
 $$Y = 0.8 \cdot X_1 + \varepsilon, \qquad \varepsilon \sim \mathcal{N}(0,1),
   \qquad \mathbf{X} \sim \mathcal{N}(\mathbf{0},\, \Sigma_{\rho}^{\mathrm{AR(1)}})$$
 
-Con $\beta_1 = 0.8$ e $n = 150$ osservazioni, il rapporto segnale/rumore è basso: un metodo
-instabile fatica a distinguere $X_1$ dalle sue vicine correlate.
+Con $\beta_1 = 0.8$ e $n = 150$ osservazioni, il rapporto segnale/rumore è basso: la
+classifica di importanza può diventare instabile e diffondere credito anche su variabili
+non causali molto correlate.
 
 ```{r exp2-data}
 n   <- 150
@@ -373,84 +386,162 @@ Y_corr    <- as.numeric(X_mat %*% beta_true + rnorm(n))
 df_corr   <- data.frame(Y = Y_corr, X_mat)
 ```
 
-## Instabilità: il ranking MDI cambia tra run
+## Instabilità: distribuzione di MDI e MDA su 30 run
 
-Eseguiamo lo stesso Random Forest 30 volte cambiando solo il seme casuale (non i dati) e
-registriamo il rango assegnato dalla MDI a ciascuna variabile (1 = più importante).
-Stampiamo la tabella completa di medie e deviazioni standard per ogni variabile.
+Eseguiamo lo stesso Random Forest 30 volte (cambiando solo il seme) e, per ogni run,
+calcoliamo MDI e MDA normalizzate in $[0,1]$. Visualizziamo poi la distribuzione delle
+importanze con boxplot, separando $X_1$ (causale), $X_2$-$X_4$ (fortemente correlate) e
+$X_5$-$X_{12}$ (correlazione decrescente).
 
 ```{r exp2-instability, cache=TRUE}
-n_runs      <- 30
-rank_matrix <- matrix(NA, nrow = p, ncol = n_runs,
-                      dimnames = list(paste0("X", 1:p), paste0("Run", 1:n_runs)))
-
-for (i in seq_len(n_runs)) {
-  set.seed(i * 13)
-  rf_i             <- randomForest(Y ~ ., data = df_corr, ntree = 300)
-  rank_matrix[, i] <- rank(-importance(rf_i, type = 2)[, 1])
+normalize01 <- function(x) {
+  x <- x - min(x)
+  if (max(x) == 0) return(x)
+  x / max(x)
 }
 
-# Tabella sintetica: rango medio e SD per ciascuna variabile
-rank_summary <- apply(rank_matrix, 1, function(x)
-  c(media = round(mean(x), 1), sd = round(sd(x), 2),
-    min = min(x), max = max(x)))
-print(t(rank_summary))
-```
+n_runs <- 30
+results <- vector("list", n_runs)
+for (i in seq_len(n_runs)) {
+  set.seed(i * 13)
+  rf_i <- randomForest(Y ~ ., data = df_corr, ntree = 300, importance = TRUE)
+  results[[i]] <- data.frame(
+    Run      = i,
+    Variable = paste0("X", 1:p),
+    MDI      = normalize01(importance(rf_i, type = 2)[, 1]),
+    MDA      = normalize01(importance(rf_i, type = 1)[, 1])
+  )
+}
 
-```{r exp2-instability-plot, fig.width=10, fig.height=5}
-rank_long <- as.data.frame(rank_matrix) %>%
-  tibble::rownames_to_column("Variable") %>%
-  pivot_longer(-Variable, names_to = "Run", values_to = "Rank") %>%
-  mutate(Variable = factor(Variable, levels = paste0("X", 1:p)))
+long_df <- bind_rows(results) %>%
+  pivot_longer(c(MDI, MDA), names_to = "Metodo", values_to = "Importanza") %>%
+  mutate(
+    Variable = factor(Variable, levels = paste0("X", 1:p)),
+    Metodo   = factor(
+      Metodo,
+      levels = c("MDI", "MDA"),
+      labels = c("MDI - Mean Decrease Impurity", "MDA - Mean Decrease Accuracy")
+    ),
+    Gruppo = case_when(
+      Variable == "X1" ~ "X1 (Unica Variabile Causale)",
+      Variable %in% c("X2", "X3", "X4") ~ "X2-X4 (Altamente Correlate con X1, rho >= 0.85)",
+      TRUE ~ "X5-X12 (Correlazione Decrescente)"
+    ),
+    Gruppo = factor(
+      Gruppo,
+      levels = c(
+        "X1 (Unica Variabile Causale)",
+        "X2-X4 (Altamente Correlate con X1, rho >= 0.85)",
+        "X5-X12 (Correlazione Decrescente)"
+      )
+    )
+  )
 
-# Ordine sull'asse x: variabili ordinate per rango mediano
-var_order <- rank_long %>%
-  group_by(Variable) %>%
-  summarise(med = median(Rank), .groups = "drop") %>%
-  arrange(med) %>%
-  pull(Variable) %>%
-  as.character()
+pct_x1_top <- long_df %>%
+  group_by(Metodo, Run) %>%
+  slice_max(Importanza, n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  group_by(Metodo) %>%
+  summarise(pct = mean(Variable == "X1") * 100, .groups = "drop")
 
-rank_long <- rank_long %>%
-  mutate(Variable = factor(as.character(Variable), levels = var_order))
+x1_median <- long_df %>%
+  filter(Variable == "X1") %>%
+  group_by(Metodo) %>%
+  summarise(med_x1 = median(Importanza), .groups = "drop")
 
-# Posizione x di X1 nell'ordine del grafico (per l'annotazione)
-x1_pos <- which(var_order == "X1")
-
-ggplot(rank_long, aes(x = Variable, y = Rank)) +
-  # Tutti i box in azzurro
-  geom_boxplot(fill = "#A8DADC", alpha = 0.85, outlier.size = 1.2, width = 0.6) +
-  # Sovrapponi il box di X1 in rosso con bordo marcato
-  geom_boxplot(
-    data      = dplyr::filter(rank_long, Variable == "X1"),
-    fill      = "#E63946", alpha = 0.9, width = 0.6,
-    color     = "#B5002A", linewidth = 1.2
-  ) +
-  # Etichetta testuale sopra X1
-  annotate("text", x = x1_pos, y = 0.3,
-           label = "X1 (causale)", color = "#B5002A",
-           size = 3.2, fontface = "bold", vjust = 1) +
-  scale_y_reverse(breaks = 1:p) +
-  labs(
-    title    = "Instabilit\u00e0 dei ranghi MDI su 30 run indipendenti",
-    subtitle = paste0("n=", n, ", p=", p, " predittori, AR(1) con \u03c1=", rho,
-                      ", \u03b2\u2081=0.8 \u2014 solo X1 \u00e8 causale"),
-    x = NULL, y = "Rango MDI (1 = pi\u00f9 importante)"
+annot_df <- pct_x1_top %>%
+  mutate(
+    label = paste0("X1 e prima solo nel ", round(pct), "% delle run"),
+    Variable = "X12",
+    y = 1.08
   )
 ```
 
-**Lettura del grafico e della tabella:**
-Ogni box mostra la distribuzione dei ranghi di una variabile nelle 30 esecuzioni.
+```{r exp2-instability-plot, fig.width=11, fig.height=6}
+pal_fill <- c(
+  "X1 (Unica Variabile Causale)" = COL_MDI,
+  "X2-X4 (Altamente Correlate con X1, rho >= 0.85)" = COL_MDA,
+  "X5-X12 (Correlazione Decrescente)" = COL_NEUTRAL
+)
 
-Il risultato rivela due livelli distinti di instabilità. In cima, $X_1$ e $X_2$ mantengono
-le prime due posizioni in modo quasi stabile (SD bassa): la MDI riesce a separarle dal resto
-del gruppo. Il vero problema però emerge nelle posizioni successive: le variabili $X_3$–$X_{12}$
-si contendono le posizioni 3–12 in modo fortemente caotico, con SD molto elevata. Per un
-analista reale che non conosce la verità e selezionasse le prime $k = 5$ variabili, il set
-selezionato cambierebbe sostanzialmente ad ogni esecuzione: al posto di rumore ordinato
-troverebbe rumore diverso ogni volta. Questo è il danno concreto dell'instabilità: non
-necessariamente perdere $X_1$, ma non poter sapere *quali* variabili di corredo sono
-affidabili.
+pal_border <- c(
+  "X1 (Unica Variabile Causale)" = COL_MDI_DARK,
+  "X2-X4 (Altamente Correlate con X1, rho >= 0.85)" = COL_MDA_DARK,
+  "X5-X12 (Correlazione Decrescente)" = COL_NEUTRAL_DARK
+)
+
+tema_slide <- theme_minimal(base_size = 13) +
+  theme(
+    plot.title        = element_text(face = "bold", size = 15, color = "grey10"),
+    plot.subtitle     = element_text(color = "grey35", size = 11, margin = margin(b = 12)),
+    strip.text        = element_text(face = "bold", size = 12, color = "grey20"),
+    strip.background  = element_rect(fill = "grey93", color = NA),
+    axis.text.x       = element_text(size = 10, face = "bold", color = "grey30"),
+    axis.title.y      = element_text(size = 11),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor  = element_blank(),
+    panel.grid.major.y = element_line(color = "grey92", linewidth = 0.4),
+    legend.position   = "bottom",
+    legend.title      = element_blank(),
+    panel.spacing     = grid::unit(1.5, "lines"),
+    plot.margin       = margin(16, 16, 12, 16)
+  )
+
+ggplot(long_df, aes(x = Variable, y = Importanza, fill = Gruppo, color = Gruppo)) +
+  geom_hline(yintercept = 1, linetype = "solid", color = "grey80", linewidth = 0.6) +
+  geom_hline(yintercept = 0, linetype = "solid", color = "grey80", linewidth = 0.6) +
+  geom_hline(
+    data = x1_median,
+    aes(yintercept = med_x1),
+    linetype = "dashed", color = COL_MDI_DARK, linewidth = 0.8, alpha = 0.6
+  ) +
+  geom_boxplot(width = 0.6, alpha = 0.85, outlier.size = 1.2, outlier.alpha = 0.6) +
+  geom_text(
+    data = annot_df,
+    aes(x = Variable, y = y, label = label),
+    inherit.aes = FALSE,
+    color = COL_MDI_DARK, size = 3.5, fontface = "bold", hjust = 1
+  ) +
+  annotate(
+    "text", x = "X12", y = 0.93,
+    label = "Target teorico (X1 = 1)", color = "grey50",
+    size = 3, hjust = 1, fontface = "italic"
+  ) +
+  annotate(
+    "text", x = "X12", y = -0.07,
+    label = "Target teorico (rumore = 0)", color = "grey50",
+    size = 3, hjust = 1, fontface = "italic"
+  ) +
+  scale_fill_manual(values = pal_fill) +
+  scale_color_manual(values = pal_border) +
+  scale_y_continuous(
+    limits = c(-0.1, 1.15),
+    breaks = c(0, 0.5, 1),
+    labels = c("0", "0.5", "1")
+  ) +
+  facet_wrap(~ Metodo, ncol = 2) +
+  labs(
+    title = "Il paradosso della correlazione nelle variable importance",
+    subtitle = paste0(
+      "Distribuzione dell'importanza su 30 run (n=", n, ", p=", p,
+      ", AR(1), rho=", rho, ")"
+    ),
+    x = NULL,
+    y = "Importanza normalizzata [0, 1]"
+  ) +
+  tema_slide +
+  guides(
+    fill = guide_legend(override.aes = list(alpha = 1)),
+    color = guide_legend(override.aes = list(linewidth = 1))
+  )
+```
+
+**Lettura del grafico:**
+I boxplot mostrano che, con correlazione estrema ($\rho = 0.99$), sia MDI sia MDA faticano a
+concentrare l'importanza su $X_1$ in modo stabile tra run: parte del segnale viene redistribuita
+alle variabili fortemente correlate ($X_2$-$X_4$). Le linee orizzontali indicano il comportamento
+ideale (causa vera vicino a 1, rumore vicino a 0), mentre la linea rossa tratteggiata mostra la
+mediana osservata di $X_1$ nei due metodi.
 
 ---
 
@@ -501,7 +592,7 @@ imp_comparison <- data.frame(
     Variable = factor(Variable, levels = paste0("X", 1:p))
   )
 
-pal3 <- c(MDI = "#E63946", Permutation = "#F4A261", Conditional = "#2A9D8F")
+pal3 <- c(MDI = COL_MDI, Permutation = COL_MDA, Conditional = COL_CONDITIONAL)
 
 ggplot(imp_comparison,
        aes(x = Variable, y = Importanza, fill = Metodo, alpha = Causale)) +
@@ -512,7 +603,7 @@ ggplot(imp_comparison,
   scale_y_continuous(limits = c(0, 1.12), expand = c(0, 0)) +
   coord_cartesian(clip = "off") +
   annotate("text", x = 1, y = 1.08, label = "\u2713 causale",
-           size = 3.5, color = "#2A9D8F", fontface = "bold") +
+           size = 3.5, color = COL_CONDITIONAL, fontface = "bold") +
   facet_wrap(~ Metodo, ncol = 1) +
   labs(
     title    = "Confronto tra indici di importanza",
@@ -621,7 +712,7 @@ ggplot(pr_long6, aes(x = Metodo, y = value, fill = Metodo)) +
   geom_boxplot(alpha = 0.85, width = 0.5, outlier.size = 1) +
   geom_jitter(width = 0.12, size = 1.2, alpha = 0.45, color = "grey30") +
   facet_wrap(~ Metrica) +
-  scale_fill_manual(values = c(MDI = "#E63946", Permutation = "#F4A261"),
+  scale_fill_manual(values = c(MDI = COL_MDI, Permutation = COL_MDA),
                     guide = "none") +
   scale_y_continuous(limits = c(0, 1.05),
                      labels = percent_format(accuracy = 1)) +
