@@ -51,8 +51,6 @@ Il problema è che questa classifica è spesso **inaffidabile**, e questo notebo
   queste non hanno alcun legame reale con quello che stai cercando di prevedere.
 - Quando alcune variabili sono simili tra loro (correlate), il modello distribuisce il "credito"
   in modo arbitrario, rendendo i risultati caotici e instabili.
-- L'instabilità peggiora drasticamente quando il numero di variabili supera il numero di
-  osservazioni — situazione comune in genomica.
 
 ## Random Forest: una sintesi
 
@@ -151,7 +149,7 @@ instabilità è pericolosa: un analista che selezionasse le prime $k$ variabili 
 variabili rumore diverse ad ogni esecuzione, e il "gene più importante" di oggi potrebbe non
 comparire nella lista di domani.
 
-## Soluzioni: Conditional Importance e Stability Selection
+## Soluzioni: Conditional Importance
 
 ### Conditional Permutation Importance (Strobl et al., 2008)
 
@@ -171,40 +169,14 @@ il bias da cardinalità, *prima* ancora di applicare la permutazione condizional
 con `randomForest` è quindi tra due modelli con algoritmi di splitting diversi, non solo
 tra due indici.
 
-### Stability Selection (Meinshausen & Bühlmann, 2010)
-
-Invece di fidarsi di un'unica esecuzione del modello, la Stability Selection chiede: **questa
-variabile viene sempre selezionata, o solo ogni tanto per caso?**
-
-Il procedimento con LASSO come selettore base:
-
-1. Si generano $B$ sotto-campioni di dimensione $n/2$ (senza reimmissione).
-2. Su ciascuno si stima un percorso LASSO e si registrano le variabili selezionate.
-3. La **probabilità di selezione** $\hat{\Pi}_j$ è la frazione di sotto-campioni in cui
-   $X_j$ è stata selezionata:
-
-$$\hat{\Pi}_j = \frac{1}{B}\sum_{b=1}^{B} \mathbf{1}\!\left[X_j \in \hat{S}^{(b)}\right]$$
-
-Si dichiara importante solo chi supera una soglia (tipicamente $\pi_{\text{thr}} = 0.75$).
-Il vantaggio chiave è una **garanzia formale sul numero di falsi positivi attesi** (PFER):
-
-$$E\!\left[\bigl|\hat{S}^{\text{stable}} \cap S^c\bigr|\right]
-  \leq \frac{q^2}{(2\pi_{\text{thr}} - 1)\,p}$$
-
-dove $q$ è il numero medio di variabili selezionate e $S^c$ è l'insieme delle variabili
-irrilevanti. Il pacchetto `stabs` implementa la versione corretta di Shah & Samworth (2013)
-con assunzione di unimodalità (`sampling.type = "SS"`), che fornisce un bound più stretto
-rispetto alla formulazione originale del 2010.
-
 ---
 
 # Setup
 
 ```{r packages}
-pkgs <- c("randomForest", "party", "stabs", "glmnet",
+pkgs <- c("randomForest", "party",
           "MASS", "ggplot2", "dplyr", "tidyr", "patchwork",
-          "reshape2", "RColorBrewer", "forcats", "scales",
-          "Boruta", "fastshap")
+          "reshape2", "RColorBrewer", "forcats", "scales")
 to_install <- pkgs[!pkgs %in% installed.packages()[, "Package"]]
 
 repos <- getOption("repos")
@@ -216,8 +188,6 @@ if (length(to_install)) install.packages(to_install, dependencies = TRUE)
 
 library(randomForest)
 library(party)
-library(stabs)
-library(glmnet)
 library(MASS)
 library(ggplot2)
 library(dplyr)
@@ -227,8 +197,6 @@ library(reshape2)
 library(RColorBrewer)
 library(forcats)
 library(scales)
-library(Boruta)
-library(fastshap)
 
 tema_base <- theme_minimal(base_size = 12) +
   theme(
@@ -293,47 +261,86 @@ cat("Valori MDI:\n");         print(round(imp_mdi, 2))
 cat("\nValori Permutation:\n"); print(round(imp_mda, 2))
 ```
 
-```{r exp1-plot, fig.width=10, fig.height=4.5}
-make_bar <- function(df, y_col, fill_col, titolo) {
-  ggplot(df, aes(x = Variable, y = .data[[y_col]])) +
-    geom_col(fill = fill_col, alpha = 0.9, width = 0.6) +
-    geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
-    labs(title = titolo, x = NULL, y = "Importanza stimata") +
-    theme(plot.title = element_text(hjust = 0.5, size = 12, face = "bold"))
-}
+```{r exp1-plot, fig.width=9, fig.height=5}
+# --- Dati in formato lungo per barre raggruppate ---
+imp_long <- imp_df %>%
+  pivot_longer(c(MDI, Permutation),
+               names_to  = "Metodo",
+               values_to = "Valore") %>%
+  mutate(Metodo = factor(Metodo, levels = c("MDI", "Permutation")))
 
-p_mdi  <- make_bar(imp_df, "MDI",         "#E63946", "MDI (IncNodePurity)")
-p_perm <- make_bar(imp_df, "Permutation", "#457B9D", "Permutation Importance (%IncMSE)")
+# Moltiplicatori MDI rispetto alla variabile binaria (per annotazioni)
+mdi_ref     <- imp_mdi["X_bin"]
+mdi_mult    <- round(imp_mdi / mdi_ref, 1)
+mult_labels <- paste0("\u00d7", mdi_mult)   # ×1, ×3.7, …
 
-(p_mdi + p_perm) +
-  plot_annotation(
-    title    = "Bias della MDI verso variabili ad alta cardinalità",
-    subtitle = "Y è rumore puro — nessun predittore è informativo",
-    theme    = theme(
-      plot.title    = element_text(face = "bold", size = 14),
-      plot.subtitle = element_text(color = "grey40", size = 10)
-    )
+# Posizioni x delle barre MDI nel grafico dodge (leggermente a sinistra del centro)
+var_levels <- levels(imp_long$Variable)
+x_pos_mdi  <- seq_along(var_levels) - 0.2
+
+annot_df <- data.frame(
+  x_dodge = x_pos_mdi,
+  y_top   = as.numeric(imp_mdi) + 2.5,
+  label   = mult_labels
+)
+
+# Palette
+pal_metodi <- c(MDI = "#E63946", Permutation = "#457B9D")
+
+ggplot(imp_long,
+       aes(x = Variable, y = Valore, fill = Metodo, group = Metodo)) +
+  # Barre raggruppate
+  geom_col(position = position_dodge(0.72), width = 0.65, alpha = 0.92) +
+  # Linea "valore atteso corretto = 0"
+  geom_hline(yintercept = 0, color = "#2d6a4f", linewidth = 1) +
+  # Etichetta della linea
+  annotate("text", x = 4.35, y = 2.5,
+           label = "Atteso: 0", color = "#2d6a4f",
+           size = 3, hjust = 0, fontface = "italic") +
+  # Moltiplicatori sopra le barre MDI
+  geom_text(data = annot_df,
+            aes(x = x_dodge, y = y_top, label = label),
+            inherit.aes = FALSE,
+            color = "#B5002A", fontface = "bold", size = 3.6, vjust = 0) +
+  scale_fill_manual(values = pal_metodi,
+                    labels = c("MDI", "MDA")) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.18))) +
+  coord_cartesian(clip = "off") +
+  labs(
+    title    = "Bias della MDI verso variabili ad alta cardinalit\u00e0",
+    subtitle = "Y \u00e8 rumore puro \u2014 nessun predittore ha alcun legame con Y",
+    x        = "Predittore (da bassa a alta cardinalit\u00e0)",
+    y        = "Importanza stimata (valori relativi)",
+    fill     = NULL,
+    caption  = ""
+  ) +
+  theme(
+    legend.position       = "top",
+    legend.key.size       = unit(0.45, "cm"),
+    plot.caption          = element_text(color = "grey45", size = 8.5, hjust = 0),
+    plot.caption.position = "plot"
   )
 ```
 
 **Interpretazione:**
-La MDI assegna importanza crescente man mano che la cardinalità aumenta: la variabile continua
-riceve un'importanza circa 5–7 volte più alta di quella binaria, pur contenendo esattamente le
-stesse informazioni — nessuna. Questo è il bias da cardinalità, strutturale e non eliminabile
-senza cambiare metodo.
+La MDI (barre rosse) mostra chiaramente un'inflazione dell'importanza al crescere della
+cardinalità: tutte le variabili sono rumore, eppure la variabile continua risulta molto più
+importante della binaria. I moltiplicatori sopra le barre MDI (ad es. ×1, ×3.7, ×9.7, ×11)
+quantificano questa inflazione rispetto alla variabile binaria di riferimento.
 
-La Permutation Importance riduce ma **non elimina** il problema. I valori numerici mostrano che
-anche X\_cont e X\_cat15 ricevono importanza Permutation non trascurabile (nell'ordine di 5–10
-%IncMSE), ben superiore ai valori attesi di zero per un predittore irrilevante. Il meccanismo è
-lo stesso descritto da Strobl et al. (2007): rimescolare una variabile continua con molti valori
-distinti crea coppie (osservazione, valore permutato) che non esistono nel dataset originale,
-perturbando le previsioni OOB in modo artificiale. La Permutation è quindi *meno* distorta della
-MDI, ma non è immune — e su dati ad alta cardinalità con $n$ grande la distorsione residua può
-essere tutt'altro che trascurabile.
+La MDA (barre blu, Permutation) è molto più vicina allo zero e fornisce una misura più
+conservativa della rilevanza: permutare una variabile irrilevante dovrebbe lasciare
+invariate le prestazioni, quindi un valore vicino a zero è atteso. Tuttavia la Permutation
+non è completamente immune agli artefatti di cardinalità: variabili ad alta cardinalità
+possono ancora mostrare un contributo positivo, come si vede per `X_cont`.
 
-La soluzione corretta è la **Conditional Importance** (`cforest`), che rimescola ogni variabile
-solo condizionatamente alle variabili correlate, eliminando le combinazioni impossibili. Lo
-vedremo nell'Esperimento 3.
+La linea `Atteso: 0` indica il valore teorico per un predittore irrilevante. In sintesi:
+- la MDI è fortemente distorta dalla cardinalità e tende a sovrastimare variabili con molti
+  valori distinti;
+- la MDA mitiga gran parte di questo bias, ma può conservare residui di importanza per
+  predittori ad alta cardinalità;
+Per ridurre definitivamente il bias è preferibile usare misure condizionate (p.es. Conditional
+Importance tramite `cforest`), che vedremo nell'Esperimento 3.
 
 ---
 
@@ -524,100 +531,12 @@ ggplot(imp_comparison,
 | Metodo | Comportamento osservato |
 |--------|------------------------|
 | **MDI** | Distribuisce l'importanza sul blocco correlato: $X_2$ è a circa 0.6, $X_3$ e $X_4$ intorno a 0.3. Il profilo scende rapidamente dopo $X_4$ |
-| **Permutation** | Il profilo è simile alla MDI per le prime variabili ($X_2 \approx 0.6$, $X_3$–$X_4 \approx 0.3$), ma distribuisce importanza residua su un numero maggiore di variabili lontane ($X_5$–$X_{12}$ tutte con barre visibili). Il vantaggio della Permutation rispetto alla MDI su dati con correlazione non emerge chiaramente in questa singola esecuzione — lo vedremo in modo quantitativo nell'Esperimento 5 (precision e recall su 40 run) |
+| **Permutation** | Il profilo è simile alla MDI per le prime variabili ($X_2 \approx 0.6$, $X_3$–$X_4 \approx 0.3$), ma distribuisce importanza residua su un numero maggiore di variabili lontane ($X_5$–$X_{12}$ tutte con barre visibili) |
 | **Conditional** | Concentra quasi tutta l'importanza su $X_1$ ($\approx 0.95$); $X_2$ scende a $\approx 0.35$, tutto il resto cade vicino a zero. È l'unico metodo che isola la variabile causale in modo netto in questa singola esecuzione |
 
 ---
 
-# Esperimento 4 — Stability Selection
-
-## Algoritmo e garanzie teoriche
-
-La Stability Selection risponde alla domanda: **questa variabile viene selezionata sempre,
-o solo ogni tanto per caso?** Una variabile informativa dovrebbe emergere in qualsiasi
-sottocampione del dataset; una variabile rumore verrà selezionata solo sporadicamente.
-
-Il procedimento con LASSO come selettore base:
-
-1. Si generano $B = 100$ sotto-campioni di dimensione $n/2$ senza reimmissione.
-2. Su ciascuno si stima un percorso LASSO e si registrano le variabili selezionate.
-3. La probabilità di selezione $\hat{\Pi}_j$ è la frazione di sotto-campioni con $X_j$ selezionata.
-
-Con $\pi_{\mathrm{thr}} = 0.75$ e `PFER = 1`, il metodo garantisce al massimo **1 falso
-positivo atteso** tra tutte le variabili selezionate. Il pacchetto `stabs` usa la versione
-Shah & Samworth (2013) con assunzione di unimodalità, che fornisce garanzie più stringenti
-rispetto alla formulazione originale.
-
-```{r exp4-stabs, cache=TRUE}
-X_stabs <- as.matrix(df_corr[, paste0("X", 1:p)])
-Y_stabs <- df_corr$Y
-
-set.seed(404)
-stab_lasso <- stabsel(
-  x             = X_stabs,
-  y             = Y_stabs,
-  fitfun        = glmnet.lasso,
-  cutoff        = 0.75,
-  PFER          = 1,
-  B             = 100,
-  sampling.type = "SS"
-)
-print(stab_lasso)
-```
-
-```{r exp4-plot, fig.width=10, fig.height=4.5}
-sel_probs <- stab_lasso$max[paste0("X", 1:p)]
-
-stab_df <- data.frame(
-  Variable = factor(paste0("X", 1:p), levels = paste0("X", 1:p)),
-  Prob     = sel_probs,
-  Selected = sel_probs >= 0.75,
-  Causale  = paste0("X", 1:p) == "X1"
-)
-
-ggplot(stab_df, aes(x = Variable, y = Prob, fill = Selected, color = Causale)) +
-  geom_col(width = 0.65, alpha = 0.9) +
-  geom_hline(yintercept = 0.75, linetype = "dashed", color = "#E63946", linewidth = 1) +
-  annotate("text", x = 9.3, y = 0.79,
-           label = expression(pi[thr] == 0.75),
-           color = "#E63946", size = 3.8) +
-  scale_fill_manual(
-    values = c("TRUE" = "#2A9D8F", "FALSE" = "#ADB5BD"),
-    labels = c("TRUE" = "Selezionata", "FALSE" = "Non selezionata"),
-    name   = NULL
-  ) +
-  scale_color_manual(
-    values = c("TRUE" = "#B5002A", "FALSE" = "transparent"),
-    guide  = "none"
-  ) +
-  scale_y_continuous(limits = c(0, 1.05), labels = percent_format(accuracy = 1)) +
-  labs(
-    title    = "Stability Selection con LASSO",
-    subtitle = "Probabilit\u00e0 di selezione su 100 sotto-campioni \u2014 il bordo scuro indica la variabile causale X1",
-    x = NULL, y = "Probabilit\u00e0 di selezione"
-  )
-```
-
-**Risultato:** $X_1$ raggiunge $\hat{\Pi}_1 = 0.97$: viene selezionata nel 97% dei sotto-campioni,
-ben al di sopra della soglia $\pi_{\text{thr}} = 0.75$. Tutte le altre variabili restano sotto
-il 35% — con $X_4$ e $X_{12}$ che mostrano le probabilità più alte tra le variabili rumore
-(rispettivamente ~32% e ~31%) senza avvicinarsi alla soglia. Il loro segnale scompare non
-appena si cambia il campione, confermando che si trattava solo di un artefatto della
-correlazione con $X_1$.
-
-**Nota sull'output di `stabs`:** il valore `PFER (*): 0.758` riportato nell'output non è
-il numero di falsi positivi tra le variabili *selezionate*: la riga con `(*)` indica il numero
-atteso di variabili a *bassa* probabilità di selezione erroneamente incluse, una metrica
-interna al pacchetto. Il bound formale sui falsi positivi tra le variabili selezionate è
-controllato dal parametro `PFER = 1` specificato nella chiamata, che garantisce
-$E[|\hat{S}^{\text{stable}} \cap S^c|] \leq 1$.
-
-La Stability Selection produce una selezione **univoca e corretta**, con garanzia formale
-sul numero di falsi positivi.
-
----
-
-# Esperimento 5 — Confronto quantitativo: precision e recall
+# Esperimento 4 — Confronto quantitativo: precision e recall
 
 ## Setup con struttura a blocchi
 
@@ -730,391 +649,7 @@ La Permutation Importance ha mediana più alta (~75% vs ~67% di MDI) e variabili
 reale tra run (SD=0.146): in molte esecuzioni riesce a trovare tutte e 3 le causali (100%),
 in altre ne manca una. Questo trade-off — più accurata in media, ma con variabilità
 residua — è il comportamento atteso di un metodo meno distorto ma non esente da errori
-con $n$ piccolo. Il rimando promesso nell'Esperimento 3 è confermato: su questa
-singola esecuzione il vantaggio della Permutation non era visibile, ma su 40 run il
-divario sistematico in precision e recall è netto.
-
----
-
-# Esperimento 6 — SHAP values: l'alternativa moderna
-
-## Cos'è SHAP
-
-**SHAP** (SHapley Additive exPlanations, Lundberg & Lee 2017) è lo standard de facto
-per l'interpretabilità dei modelli di machine learning. L'idea viene dalla teoria dei giochi
-cooperativi: ogni variabile riceve come "importanza" il suo contributo marginale medio alle
-previsioni, calcolato su tutte le possibili coalizioni di variabili presenti o assenti.
-
-A differenza di MDI e Permutation Importance, SHAP produce un **valore per ogni singola
-osservazione**: si vede non solo *quanto* conta una variabile in media, ma *come* influenza
-ogni singola previsione e *in che direzione*. Vedremo inoltre che su dati fortemente correlati
-SHAP tende ad assegnare importanza residua inferiore alla Permutation Importance alle variabili
-non causali, avvicinandosi al comportamento della Conditional Importance.
-
-**Nota tecnica:** qui usiamo `fastshap`, che stima i valori SHAP tramite campionamento
-Monte Carlo (`nsim = 100`). È un'approssimazione: con molte variabili correlate o con
-`nsim` basso i valori possono essere rumorosi. Per stime esatte su alberi si possono usare
-i pacchetti `treeshap` o `shapviz` + `ranger`.
-
-```{r exp6-shap, cache=TRUE}
-set.seed(707)
-pfun <- function(object, newdata) predict(object, newdata = newdata)
-
-shap_vals <- fastshap::explain(
-  rf_main,
-  X            = df_corr[, paste0("X", 1:p)],
-  pred_wrapper = pfun,
-  nsim         = 100
-)
-```
-
-```{r exp6-beeswarm, fig.width=10, fig.height=6}
-shap_mean_imp  <- colMeans(abs(shap_vals))
-var_order_shap <- names(sort(shap_mean_imp, decreasing = TRUE))
-
-shap_long <- as.data.frame(shap_vals) %>%
-  mutate(obs = row_number()) %>%
-  pivot_longer(-obs, names_to = "Variable", values_to = "SHAP")
-
-feat_long <- df_corr[, paste0("X", 1:p)] %>%
-  mutate(obs = row_number()) %>%
-  pivot_longer(-obs, names_to = "Variable", values_to = "FeatVal") %>%
-  group_by(Variable) %>%
-  mutate(FeatVal_sc = (FeatVal - min(FeatVal)) /
-                      (max(FeatVal) - min(FeatVal))) %>%
-  ungroup()
-
-shap_bee <- left_join(shap_long, feat_long, by = c("obs", "Variable")) %>%
-  mutate(Variable = factor(Variable, levels = rev(var_order_shap)))
-
-ggplot(shap_bee, aes(x = SHAP, y = Variable, color = FeatVal_sc)) +
-  geom_jitter(height = 0.22, size = 0.9, alpha = 0.55) +
-  geom_vline(xintercept = 0, color = "grey40", linewidth = 0.7) +
-  scale_color_gradient(low = "#457B9D", high = "#E63946",
-                       name = "Valore feature\n(basso \u2192 alto)") +
-  labs(
-    title    = "SHAP Beeswarm Plot \u2014 Random Forest su dati AR(1)",
-    subtitle = "Ogni punto = un'osservazione | colore = valore della feature | posizione x = impatto sulla previsione",
-    x = "Valore SHAP (impatto sulla previsione)", y = NULL
-  ) +
-  theme(legend.position = "right")
-```
-
-```{r exp6-comparison, fig.width=10, fig.height=4}
-imp_comp <- data.frame(
-  Variable    = paste0("X", 1:p),
-  SHAP        = normalize(shap_mean_imp),
-  MDI         = normalize(imp_mdi_main),
-  Permutation = normalize(imp_mda_main)
-) %>%
-  pivot_longer(-Variable, names_to = "Metodo", values_to = "Importanza") %>%
-  mutate(
-    Variable = factor(Variable, levels = paste0("X", 1:p)),
-    Metodo   = factor(Metodo, levels = c("MDI", "Permutation", "SHAP"))
-  )
-
-pal_comp <- c(MDI = "#E63946", Permutation = "#F4A261", SHAP = "#6A0572")
-
-ggplot(imp_comp, aes(x = Variable, y = Importanza, fill = Metodo)) +
-  geom_col(position = position_dodge(0.75), width = 0.65, alpha = 0.9) +
-  scale_fill_manual(values = pal_comp) +
-  scale_y_continuous(limits = c(0, 1.1), expand = c(0, 0)) +
-  labs(
-    title    = "SHAP vs MDI vs Permutation (normalizzate)",
-    subtitle = paste0("Solo X1 \u00e8 causale \u2014 dati AR(1) con \u03c1=", rho),
-    x = NULL, y = "Importanza normalizzata [0, 1]", fill = NULL
-  )
-```
-
-**Interpretazione del grafico di confronto (normalizzato):**
-Contrariamente a quanto ci si potrebbe aspettare, SHAP non si comporta in modo simile alla
-Permutation Importance sulle variabili correlate. Dal grafico si vede chiaramente che SHAP
-assegna importanza residua *inferiore* alla Permutation su quasi tutte le variabili non causali
-($X_2$: SHAP $\approx$ 0.48 vs Permutation $\approx$ 0.62; $X_4$: SHAP $\approx$ 0.20 vs
-Permutation $\approx$ 0.35; $X_{10}$: SHAP $\approx$ 0.02 vs Permutation $\approx$ 0.25).
-SHAP si avvicina quindi di più alla Conditional Importance nel penalizzare i proxy correlati,
-pur senza annullarli completamente. Parte di questa differenza potrebbe essere attribuibile
-all'approssimazione Monte Carlo di `fastshap` con `nsim = 100` su dati fortemente correlati
-($\rho = 0.95$): stime esatte potrebbero ridurre ulteriormente l'importanza residua delle
-variabili correlate.
-
-**Interpretazione del beeswarm:**
-Il valore aggiunto di SHAP rispetto agli indici globali è la direzione dell'effetto per ogni
-osservazione. Per $X_1$: valori alti (rosso) producono SHAP positivi — aumentano la previsione
-— e valori bassi (blu) la abbassano. Questo è coerente con il coefficiente positivo
-$\beta_1 = 0.8$ del modello generativo.
-
-Per $X_2$, essendo correlata con $X_1$ a $\rho = 0.95$, si osserva lo stesso pattern
-direzionale: rosso a destra, blu a sinistra. Questo non indica che $X_2$ ha un effetto causale,
-ma che il modello le ha trasferito parte dell'importanza di $X_1$ attraverso la correlazione —
-esattamente il problema discusso negli esperimenti precedenti, ora visibile a livello di singola
-osservazione.
-
-Per le variabili lontane da $X_1$ nella catena AR(1) ($X_8$–$X_{12}$), i punti sono distribuiti
-in modo molto più simmetrico attorno allo zero: la direzione d'effetto non è stabile, confermando
-che la loro importanza è quasi interamente rumore.
-
----
-
-# Esperimento 7 — L'effetto del rapporto n/p
-
-## Come cambia la qualità della selezione al variare della dimensione del campione?
-
-In molte applicazioni reali — soprattutto in ambito genomico — il numero di osservazioni $n$ è
-molto inferiore al numero di variabili $p$. Questo aggrava tutti i problemi visti finora:
-con pochi dati, il bias della MDI è amplificato e la varianza delle stime di importanza cresce.
-
-Fissiamo $p = 15$ predittori con struttura AR(1) a $\rho = 0.70$ e 3 variabili causali
-($X_1$, $X_6$, $X_{11}$), con $\beta = 2$, e facciamo variare $n$ da 50 a 1500. Per ogni
-valore di $n$ ripetiamo 50 volte e misuriamo la precision media del top-3. La banda
-rappresenta $\pm 1$ SD. Usiamo 50 ripetizioni (invece di 30) per stabilizzare le stime
-nei regimi a $n$ piccolo, dove la variabilità è più alta.
-
-```{r exp7-setup}
-p8    <- 15
-rho8  <- 0.70
-true8 <- c("X1", "X6", "X11")
-beta8 <- rep(0, p8)
-beta8[c(1, 6, 11)] <- 2
-Sigma8  <- toeplitz(rho8^(0:(p8 - 1)))
-n_vals8 <- c(50, 100, 200, 400, 800, 1500)
-n_rep8  <- 50   # aumentato da 30 per stabilizzare le stime a n piccolo
-```
-
-```{r exp7-simulation, cache=TRUE}
-results8 <- lapply(n_vals8, function(n8) {
-  pr <- sapply(seq_len(n_rep8), function(i) {
-    set.seed(i * 31)
-    X8 <- mvrnorm(n8, rep(0, p8), Sigma8)
-    colnames(X8) <- paste0("X", 1:p8)
-    Y8  <- as.numeric(X8 %*% beta8 + rnorm(n8))
-    df8 <- data.frame(Y = Y8, X8)
-    rf8 <- randomForest(Y ~ ., data = df8, ntree = 400, importance = TRUE)
-    top_mdi  <- names(sort(importance(rf8, type = 2)[, 1], dec = TRUE))[1:3]
-    top_perm <- names(sort(importance(rf8, type = 1)[, 1], dec = TRUE))[1:3]
-    c(MDI         = mean(top_mdi  %in% true8),
-      Permutation = mean(top_perm %in% true8))
-  })
-  data.frame(
-    n           = n8,
-    Metodo      = c("MDI", "Permutation"),
-    Precision   = rowMeans(pr),
-    Prec_sd     = apply(pr, 1, sd)
-  )
-})
-res8_df <- do.call(rbind, results8)
-```
-
-```{r exp7-plot, fig.width=10, fig.height=5}
-ggplot(res8_df, aes(x = n, y = Precision, color = Metodo, group = Metodo)) +
-  geom_ribbon(aes(ymin = pmax(0, Precision - Prec_sd),
-                  ymax = pmin(1, Precision + Prec_sd),
-                  fill = Metodo), alpha = 0.15, color = NA) +
-  geom_line(linewidth = 1.1) +
-  geom_point(size = 2.5) +
-  scale_color_manual(values = c(MDI = "#E63946", Permutation = "#F4A261")) +
-  scale_fill_manual(values  = c(MDI = "#E63946", Permutation = "#F4A261")) +
-  scale_x_log10(breaks = n_vals8, labels = n_vals8) +
-  scale_y_continuous(limits = c(0, 1.05),
-                     labels = percent_format(accuracy = 1)) +
-  labs(
-    title    = "Precision del top-3 al variare di n",
-    subtitle = paste0("p = ", p8, ", AR(1) \u03c1 = ", rho8,
-                      ", 3 variabili causali \u2014 media \u00b1 SD su ",
-                      n_rep8, " run"),
-    x = "Dimensione del campione n (scala log)",
-    y = "Precision media", color = NULL, fill = NULL
-  )
-```
-
-**Interpretazione:** La Permutation Importance è sistematicamente superiore alla MDI a parità
-di $n$, con un divario massimo a campione piccolo. A $n=50$ la differenza è di circa 17 punti
-percentuali (MDI ~63%, Permutation ~80%): il bias MDI si somma alla varianza da campionamento,
-producendo un doppio svantaggio. Entrambi i metodi hanno comunque bande ampie a $n=50$,
-segno che nessuno è affidabile con così pochi dati.
-
-Con $n=100$ la Permutation raggiunge già ~100% di precision (banda quasi nulla), mentre la MDI
-impiega fino a $n=200$ per stabilizzarsi. Questo divario di un fattore 2 nel campione necessario
-è particolarmente critico in genomica, dove $n$ è spesso fissato dai costi sperimentali: con
-$n=100$ pazienti la Permutation dà già risultati affidabili, mentre la MDI ne richiederebbe il
-doppio per le stesse garanzie.
-
----
-
-# Esperimento 8 — Dati ad alta dimensionalità (p $\gg$ n)
-
-## Il caso genomico: molte più variabili che osservazioni
-
-In genomica è comune avere $p \gg n$: migliaia di geni misurati su poche decine di pazienti.
-In questo regime i problemi visti finora si esasperano: la MDI diventa instabile perché
-centinaia di variabili rumore competono con i segnali reali su pochissimi dati.
-
-Simuliamo $p = 300$ predittori **incorrelati** con $n = 80$ osservazioni e 5 variabili causali
-sparse, con segnale moderato ($\beta = 1.5$). Il caso incorrelato è il più favorevole possibile
-per la MDI; con segnale/rumore limitato e $p \gg n$ l'instabilità è comunque rilevante.
-
-```{r exp8-setup, cache=TRUE}
-p9    <- 300
-n9    <- 80
-true9 <- c(1, 60, 120, 180, 240)
-true_names9 <- paste0("X", true9)
-
-set.seed(900)
-X9 <- matrix(rnorm(n9 * p9), nrow = n9, ncol = p9)
-colnames(X9) <- paste0("X", 1:p9)
-beta9 <- rep(0, p9)
-beta9[true9] <- 1.5
-Y9    <- as.numeric(X9 %*% beta9 + rnorm(n9))
-df9   <- data.frame(Y = Y9, X9)
-
-set.seed(901); rf9a <- randomForest(Y ~ ., data = df9, ntree = 1000, importance = TRUE)
-set.seed(999); rf9b <- randomForest(Y ~ ., data = df9, ntree = 1000, importance = TRUE)
-
-rank9a <- sort(rank(-importance(rf9a, type = 2)[, 1]))
-rank9b <- sort(rank(-importance(rf9b, type = 2)[, 1]))
-top_k9 <- 20
-top9a  <- names(rank9a)[1:top_k9]
-top9b  <- names(rank9b)[1:top_k9]
-
-# Statistiche di concordanza tra i due run
-overlap_n <- length(intersect(top9a, top9b))
-jaccard   <- overlap_n / length(union(top9a, top9b))
-recall9a  <- sum(top9a %in% true_names9)
-recall9b  <- sum(top9b %in% true_names9)
-
-cat(sprintf("Overlap top-%d tra i due run: %d/%d (%.0f%%)\n",
-            top_k9, overlap_n, top_k9,
-            100 * overlap_n / top_k9))
-cat(sprintf("Jaccard top-%d: %.2f\n", top_k9, jaccard))
-cat(sprintf("Variabili causali in top-%d: Run1 = %d/5 | Run2 = %d/5\n",
-            top_k9, recall9a, recall9b))
-cat(sprintf(
-  "\nNota: le variabili causali sono recuperate, ma sono accompagnate da %d (Run1) e %d (Run2)\n",
-  top_k9 - recall9a, top_k9 - recall9b))
-cat("variabili rumore diverse nei due run. Un analista ignaro non sa quali sono le causali.\n")
-```
-
-```{r exp8-plot, fig.width=10, fig.height=5}
-top40_9    <- names(rank9a)[1:40]
-imp9a_show <- importance(rf9a, type = 2)[top40_9, 1]
-imp9b_show <- importance(rf9b, type = 2)[top40_9, 1]
-
-plot9_df <- data.frame(
-  Variable = factor(top40_9, levels = top40_9),
-  `Run 1`  = imp9a_show,
-  `Run 2`  = imp9b_show[top40_9],
-  check.names = FALSE
-) %>%
-  pivot_longer(-Variable, names_to = "Run", values_to = "MDI") %>%
-  mutate(Causale = Variable %in% true_names9)
-
-ggplot(plot9_df, aes(x = Variable, y = MDI, fill = Run, alpha = Causale)) +
-  geom_col(position = position_dodge(0.7), width = 0.6) +
-  scale_fill_manual(values = c("Run 1" = "#E63946", "Run 2" = "#457B9D")) +
-  scale_alpha_manual(values = c("TRUE" = 1, "FALSE" = 0.45), guide = "none") +
-  labs(
-    title    = paste0("MDI nelle top-40 variabili (p=", p9, ", n=", n9, ", \u03b2=1.5)"),
-    subtitle = paste0("Variabili causali a piena opacit\u00e0 \u2014 overlap top-",
-                      top_k9, ": ", overlap_n, "/", top_k9,
-                      " | Jaccard=", round(jaccard, 2),
-                      " | Causali: Run1=", recall9a, "/5, Run2=", recall9b, "/5"),
-    x = NULL, y = "MDI (IncNodePurity)", fill = "Esecuzione"
-  ) +
-  theme(axis.text.x = element_text(angle = 60, hjust = 1, size = 7))
-```
-
-**Interpretazione:** Con $p \gg n$ e segnale moderato si osservano due effetti distinti.
-
-Da un lato, le 5 variabili causali (barre a piena opacità nel grafico) vengono recuperate in
-entrambi i run — recall 5/5 per entrambi. Questo è il caso più favorevole possibile: predittori
-incorrelati con $\beta = 1.5$ abbastanza grande da far emergere il segnale. Si noti che X120,
-pur rientrando nella top-20 di entrambi i run (confermato dal recall), non appare tra le prime
-posizioni nel grafico: il grafico mostra le top-40 ordinate per importanza MDI del Run 1, quindi
-X120 compare più a destra con barre semi-trasparenti perché il Run 1 le ha assegnato un rango
-leggermente più basso pur includendola nella top-20.
-
-Dall'altro lato, i 15 posti rimanenti nella top-20 sono occupati da variabili rumore diverse nei
-due run (Jaccard = `r round(jaccard, 2)`): un analista che non conosce la verità e lavora con
-la top-20 si troverebbe con un insieme contaminato da 15 falsi positivi, e l'insieme stesso
-cambierebbe ad ogni esecuzione — 3 variabili diverse tra i due run (overlap 17/20).
-
-In presenza di correlazione tra predittori — come in dati genomici reali — la situazione
-peggiorerebbe su entrambi i fronti: le causali stenterebbero ad emergere e l'instabilità dei
-falsi positivi aumenterebbe ulteriormente, rendendo Stability Selection e Conditional Importance
-essenziali.
-
----
-
-# Approfondimento — Il metodo Boruta
-
-## L'idea: confrontare ogni variabile con la propria "ombra"
-
-**Boruta** (Kursa & Rudnicki, 2010) affronta il bias da cardinalità confrontando ogni variabile
-non con un valore assoluto, ma con una sua **copia casuale (ombra)**: i valori della variabile
-originale vengono rimescolati, distruggendo il segnale. Per costruzione un'ombra non può essere
-informativa. Il Random Forest viene addestrato su originali + ombre, e per ogni iterazione si
-registra il massimo delle importanze ombra (*shadowMax*). Una variabile è dichiarata:
-
-- **Confermata**: supera sistematicamente shadowMax (test binomiale).
-- **Rifiutata**: rimane sistematicamente al di sotto.
-- **Tentativa**: il risultato è incerto.
-
-Il vantaggio chiave è che ogni variabile è confrontata con un'ombra **della stessa cardinalità**:
-il bias da cardinalità si cancella nella comparazione.
-
-```{r boruta-run, cache=TRUE}
-set.seed(808)
-boruta_res <- Boruta::Boruta(
-  Y ~ ., data = df_corr,
-  doTrace  = 0,
-  maxRuns  = 150,
-  ntree    = 500
-)
-print(boruta_res)
-```
-
-```{r boruta-plot, fig.width=10, fig.height=5}
-boruta_stats <- attStats(boruta_res)
-boruta_stats$Variable <- rownames(boruta_stats)
-
-shadow_thr <- mean(boruta_res$ImpHistory[, "shadowMax"], na.rm = TRUE)
-
-boruta_plot_df <- boruta_stats %>%
-  mutate(
-    Variable  = factor(Variable, levels = paste0("X", 1:p)),
-    Decisione = factor(decision,
-                       levels = c("Confirmed", "Tentative", "Rejected")),
-    Causale   = Variable == "X1"
-  )
-
-pal_boruta <- c(Confirmed = "#2A9D8F",
-                Tentative = "#F4A261",
-                Rejected  = "#ADB5BD")
-
-ggplot(boruta_plot_df,
-       aes(x = Variable, y = meanImp, fill = Decisione, color = Causale)) +
-  geom_col(width = 0.65, alpha = 0.9) +
-  geom_hline(yintercept = shadow_thr, linetype = "dashed",
-             color = "#E63946", linewidth = 1) +
-  annotate("text", x = p - 1, y = shadow_thr + 0.04,
-           label = "Media shadowMax", color = "#E63946", size = 3.5) +
-  scale_fill_manual(values = pal_boruta) +
-  scale_color_manual(values = c("TRUE" = "#B5002A", "FALSE" = "transparent"),
-                     guide = "none") +
-  labs(
-    title    = "Boruta: importanza media vs soglia delle variabili ombra",
-    subtitle = "Bordo scuro = X1 causale | linea tratteggiata = media shadowMax",
-    x = NULL, y = "Importanza media (Boruta)", fill = "Decisione"
-  )
-```
-
-**Interpretazione:** $X_1$ supera sistematicamente la soglia shadowMax e viene confermata.
-Le variabili correlate ($X_2$, $X_3$, …) vengono anch'esse confermate con $\rho = 0.95$:
-questo non è un difetto di Boruta, ma riflette il fatto che variabili fortemente correlate
-con la causa portano informazione predittiva reale, anche se non causale. Boruta non distingue
-causa da proxy correlato — è necessario complementarlo con la Conditional Importance o la
-Stability Selection quando l'obiettivo è l'identificazione causale. La tabella riepilogativa
-riflette questa distinzione.
+con $n$ piccolo.
 
 ---
 
@@ -1124,16 +659,6 @@ riflette questa distinzione.
 X1_MDI_top   <- which.max(imp_mdi_main) == 1
 X1_MDA_top   <- which.max(imp_mda_main) == 1
 X1_COND_top  <- which.max(imp_cond_main[paste0("X", 1:p)]) == 1
-X1_STAB_ok   <- stab_df$Prob[1] >= 0.75 && all(stab_df$Prob[-1] < 0.75)
-X1_SHAP_top  <- which.max(shap_mean_imp) == 1
-
-# Boruta: X1 confermata? quante altre variabili confermate?
-X1_boruta_confirmed <- boruta_res$finalDecision["X1"] == "Confirmed"
-n_boruta_confirmed  <- sum(boruta_res$finalDecision == "Confirmed")
-boruta_label <- if (X1_boruta_confirmed) {
-  if (n_boruta_confirmed == 1) "S\u00ec \u2714 (solo X1)" else
-    paste0("S\u00ec \u2714 (+ ", n_boruta_confirmed - 1, " proxy)")
-} else "No \u2718"
 
 # MDI: identificata, ma instabile tra run (nota esplicita)
 mdi_label <- if (X1_MDI_top) "S\u00ec \u2714 (instabile)" else "No \u2718"
@@ -1144,24 +669,17 @@ summary_df <- data.frame(
   Metodo = c(
     "MDI (randomForest)",
     "Permutation Imp. (randomForest)",
-    "Conditional Imp. (cforest)",
-    "Stability Selection (LASSO)",
-    "SHAP (fastshap)",
-    "Boruta"
+    "Conditional Imp. (cforest)"
   ),
-  Bias_card   = c("S\u00ec", "No", "No", "No", "No", "No"),
-  Instabile   = c("S\u00ec", "Parzialmente", "No", "No", "Parzialmente", "No"),
+  Bias_card   = c("S\u00ec", "No", "No"),
+  Instabile   = c("S\u00ec", "Parzialmente", "No"),
   X1_corretta = c(
     mdi_label,
     tick_cross(X1_MDA_top),
-    tick_cross(X1_COND_top),
-    tick_cross(X1_STAB_ok),
-    tick_cross(X1_SHAP_top),
-    boruta_label
+    tick_cross(X1_COND_top)
   ),
-  Garanzia_FP  = c("No", "No", "No", "S\u00ec (PFER)", "No", "No"),
-  Interp_obs   = c("No", "No", "No", "No", "S\u00ec", "No"),
-  Costo        = c("Basso", "Medio", "Alto*", "Medio", "Alto**", "Medio")
+  Interp_obs   = c("No", "No", "No"),
+  Costo        = c("Basso", "Medio", "Alto*")
 )
 
 knitr::kable(
@@ -1169,14 +687,12 @@ knitr::kable(
   col.names = c("Metodo", "Bias cardinalit\u00e0",
                 "Instabile con correlazione",
                 "X1 identificata",
-                "Garanzia falsi positivi",
                 "Interpret. per osservazione",
                 "Costo computazionale"),
-  align   = "lcccccc",
+  align   = "lccccc",
   caption = paste0(
     "Confronto tra metodi di variable importance. ",
-    "*cforest usa conditional inference trees, algoritmo di splitting diverso da randomForest. ",
-    "**fastshap \u00e8 un'approssimazione Monte Carlo; per stime esatte usare treeshap o shapviz+ranger."
+    "*cforest usa conditional inference trees, algoritmo di splitting diverso da randomForest."
   )
 )
 ```
@@ -1189,14 +705,6 @@ dipende dal contesto:
 - Se si lavora con predittori fortemente correlati e si vuole individuare la causa diretta,
   la **Conditional Importance** è la scelta più rigorosa — ricordando che si tratta di un
   modello diverso (cforest), non solo di un indice diverso su randomForest.
-- Se serve una **garanzia formale sui falsi positivi** — tipica in ambito clinico o
-  regolatorio — la **Stability Selection** è l'unica opzione.
-- Se l'obiettivo è capire **come e quanto** ogni variabile influenza le singole previsioni
-  (non solo la selezione globale), **SHAP** è lo strumento più ricco, con la cautela che
-  `fastshap` fornisce stime approssimate.
-- Se si vuole un metodo automatico e robusto al bias da cardinalità senza dover scegliere
-  soglie, **Boruta** è pratico, ma in presenza di alta correlazione conferma anche i proxy
-  causali insieme alla causa reale.
 
 ---
 
@@ -1207,16 +715,8 @@ dipende dal contesto:
   Variable Importance Measures: Illustrations, Sources and a Solution*. BMC Bioinformatics, 8, 25.
 - Strobl, C., Boulesteix, A.-L., Kneib, T., Augustin, T., Zeileis, A. (2008). *Conditional
   Variable Importance for Random Forests*. BMC Bioinformatics, 9, 307.
-- Meinshausen, N., Bühlmann, P. (2010). *Stability Selection*. Journal of the Royal
-  Statistical Society: Series B, 72(4), 417--473.
-- Shah, R. D., Samworth, R. J. (2013). *Variable selection with error control: Another look
-  at Stability Selection*. Journal of the Royal Statistical Society: Series B, 75(1), 55--80.
 - Hothorn, T., Hornik, K., Zeileis, A. (2006). *Unbiased Recursive Partitioning: A
   Conditional Inference Framework*. Journal of Computational and Graphical Statistics, 15(3).
-- Lundberg, S. M., Lee, S.-I. (2017). *A Unified Approach to Interpreting Model Predictions*.
-  Advances in Neural Information Processing Systems (NeurIPS), 30.
-- Kursa, M. B., Rudnicki, W. R. (2010). *Feature Selection with the Boruta Package*.
-  Journal of Statistical Software, 36(11), 1--13.
 
 ```{r session-info, echo=FALSE}
 sessionInfo()
