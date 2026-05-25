@@ -360,8 +360,8 @@ Importance tramite `cforest`), che vedremo nell'Esperimento 3.
 
 ## Setup della simulazione
 
-Creiamo un dataset con $p = 12$ variabili con struttura **AR(1)** a $\rho = 0.99$:
-correlazione estremamente alta, quindi variabili quasi indistinguibili dal punto di vista
+Creiamo un dataset con $p = 12$ variabili con struttura **AR(1)** a $\rho = 0.95$:
+correlazione molto alta, quindi variabili quasi indistinguibili dal punto di vista
 predittivo. Il segnale causale resta deliberatamente debole:
 
 $$Y = 0.8 \cdot X_1 + \varepsilon, \qquad \varepsilon \sim \mathcal{N}(0,1),
@@ -424,14 +424,14 @@ long_df <- bind_rows(results) %>%
     ),
     Gruppo = case_when(
       Variable == "X1" ~ "X1 (Unica Variabile Causale)",
-      Variable %in% c("X2", "X3", "X4") ~ "X2-X4 (Altamente Correlate con X1, rho >= 0.85)",
+      Variable %in% c("X2", "X3", "X4") ~ "X2-X4 (Altamente Correlate con X1)",
       TRUE ~ "X5-X12 (Correlazione Decrescente)"
     ),
     Gruppo = factor(
       Gruppo,
       levels = c(
         "X1 (Unica Variabile Causale)",
-        "X2-X4 (Altamente Correlate con X1, rho >= 0.85)",
+        "X2-X4 (Altamente Correlate con X1)",
         "X5-X12 (Correlazione Decrescente)"
       )
     )
@@ -460,13 +460,13 @@ annot_df <- pct_x1_top %>%
 ```{r exp2-instability-plot, fig.width=11, fig.height=6}
 pal_fill <- c(
   "X1 (Unica Variabile Causale)" = COL_MDI,
-  "X2-X4 (Altamente Correlate con X1, rho >= 0.85)" = COL_MDA,
+  "X2-X4 (Altamente Correlate con X1)" = COL_MDA,
   "X5-X12 (Correlazione Decrescente)" = COL_NEUTRAL
 )
 
 pal_border <- c(
   "X1 (Unica Variabile Causale)" = COL_MDI_DARK,
-  "X2-X4 (Altamente Correlate con X1, rho >= 0.85)" = COL_MDA_DARK,
+  "X2-X4 (Altamente Correlate con X1)" = COL_MDA_DARK,
   "X5-X12 (Correlazione Decrescente)" = COL_NEUTRAL_DARK
 )
 
@@ -537,11 +537,13 @@ ggplot(long_df, aes(x = Variable, y = Importanza, fill = Gruppo, color = Gruppo)
 ```
 
 **Lettura del grafico:**
-I boxplot mostrano che, con correlazione estrema ($\rho = 0.99$), sia MDI sia MDA faticano a
-concentrare l'importanza su $X_1$ in modo stabile tra run: parte del segnale viene redistribuita
-alle variabili fortemente correlate ($X_2$-$X_4$). Le linee orizzontali indicano il comportamento
-ideale (causa vera vicino a 1, rumore vicino a 0), mentre la linea rossa tratteggiata mostra la
-mediana osservata di $X_1$ nei due metodi.
+I boxplot mostrano che, con correlazione molto alta ($\rho = 0.95$), l'importanza non resta
+concentrata in modo pulito su $X_1$: una parte del segnale viene assorbita dalle variabili
+fortemente correlate ($X_2$-$X_4$), mentre il contributo delle variabili meno correlate si
+riduce rapidamente. La MDA tende a distribuire il credito in modo un po' più diffuso rispetto
+alla MDI, ma entrambe risentono della presenza di predittori quasi equivalenti. Le linee
+orizzontali indicano il comportamento ideale (causa vera vicino a 1, rumore vicino a 0), mentre
+la linea rossa tratteggiata riporta la mediana osservata di $X_1$ nei due metodi.
 
 ---
 
@@ -641,10 +643,10 @@ dove:
 - **Recall** = quante delle 3 variabili causali vengono trovate?
 
 Il dataset ha $p = 12$ predittori con **correlazione AR(1)** a $\rho = 0.95$, identica
-ala struttura degli Esperimenti 2 e 3. Le variabili causali sono $X_1$, $X_4$, $X_7$
+alla struttura degli Esperimenti 2 e 3. Le variabili causali sono $X_1$, $X_4$, $X_7$
 (sparse nel set di 12), con segnale debole $\beta = 1$ e $n = 100$ osservazioni.
 
-```{r exp5-setup, cache=TRUE}
+```{r exp4-setup, cache=TRUE}
 p6   <- 12
 n6   <- 100           # n piccolo: il problema è difficile
 rho6 <- 0.95          # correlazione AR(1), come Exp 2-3
@@ -666,7 +668,7 @@ df6 <- data.frame(Y = Y6, X6)
 
 ## F1 score su 30 run (MDI, MDA, Conditional)
 
-```{r exp5-repeated, cache=TRUE}
+```{r exp4-repeated, cache=TRUE}
 n_rep6 <- 30
 k6     <- 3   # selezioniamo le top-3 variabili
 
@@ -707,7 +709,7 @@ cat("\nDeviazioni standard:\n")
 print(round(apply(f1_df6[, -1], 2, sd), 3))
 ```
 
-```{r exp5-plot, fig.width=10, fig.height=5}
+```{r exp4-plot, fig.width=10, fig.height=5}
 f1_long6 <- f1_df6 %>%
   pivot_longer(-run, names_to = "Metodo", values_to = "F1") %>%
   mutate(
