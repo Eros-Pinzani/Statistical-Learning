@@ -1,7 +1,7 @@
 ---
 title: "Il Lato Oscuro della Variable Importance"
 subtitle: "Instabilità e Bias nella Selezione di Variabili in Random Forest"
-author: "Statistical Learning – A.A. 2024/25"
+author: "Statistical Learning – A.A. 2025/26"
 date: "`r Sys.Date()`"
 output:
   pdf_document:
