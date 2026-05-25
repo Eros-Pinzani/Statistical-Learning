@@ -811,17 +811,3 @@ dipende dal contesto:
   modello diverso (cforest), non solo di un indice diverso su randomForest.
 
 ---
-
-# Riferimenti
-
-- Breiman, L. (2001). *Random Forests*. Machine Learning, 45(1), 5--32.
-- Strobl, C., Boulesteix, A.-L., Zeileis, A., Hothorn, T. (2007). *Bias in Random Forest
-  Variable Importance Measures: Illustrations, Sources and a Solution*. BMC Bioinformatics, 8, 25.
-- Strobl, C., Boulesteix, A.-L., Kneib, T., Augustin, T., Zeileis, A. (2008). *Conditional
-  Variable Importance for Random Forests*. BMC Bioinformatics, 9, 307.
-- Hothorn, T., Hornik, K., Zeileis, A. (2006). *Unbiased Recursive Partitioning: A
-  Conditional Inference Framework*. Journal of Computational and Graphical Statistics, 15(3).
-
-```{r session-info, echo=FALSE}
-sessionInfo()
-```
