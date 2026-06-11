@@ -1,8 +1,7 @@
 ---
 title: "Feature Selection Prima della CV"
 subtitle: "Come una Procedura Innocente Invalida l'Intera Analisi"
-author: "Francesco Faillace, Lorenzo Maria Pennelli, Eros Pinzani — Statistical Learning A.A. 2025/26"
-date: "`r format(Sys.Date(), '%d %B %Y')`"
+author: "Eros Pinzani"
 output:
   pdf_document:
     latex_engine: xelatex
@@ -74,7 +73,7 @@ theme_set(theme_bw(base_size = 11))
 #  QUICK_RUN = FALSE → analisi completa (15-30 minuti)
 #                      usare prima della presentazione finale
 # ============================================================
-QUICK_RUN <- TRUE
+QUICK_RUN <- FALSE
 
 # Numero di simulazioni Monte Carlo
 B     <- if (QUICK_RUN) 30  else 100
@@ -481,46 +480,45 @@ l'AUC stimato dalla CV con pipeline errata e corretta su `r B` run Monte Carlo.
 La terza dimensione di analisi è la heatmap che mostra come l'ottimismo varia
 al variare di $n$ e $p$ a $k=20$ fisso.
 
-## Il Risultato Hero ($n=200$, $p=500$, $k=20$)
+## Il Risultato ($n=200$, $p=500$, $k=20$)
 
-```{r exp1-hero, cache=TRUE}
+```{r exp1, cache=TRUE}
 # Parametri del caso di riferimento
-n_hero <- 200; p_hero <- 500; k_hero <- 20
+n_exp1 <- 200; p_exp1 <- 500; k_exp1 <- 20
 
 # Monte Carlo: B run con seed diversi per riproducibilità
-res_hero <- matrix(NA, B, 2, dimnames = list(NULL, c("leaky", "correct")))
+res_exp1 <- matrix(NA, B, 2, dimnames = list(NULL, c("leaky", "correct")))
 
 for (b in seq_len(B)) {
   set.seed(SEED + b)
-  X <- gen_iid(n_hero, p_hero)
-  y <- rbinom(n_hero, 1, 0.5)         # Y ~ Bernoulli(0.5), indip. da X
+  X <- gen_iid(n_exp1, p_exp1)
+  y <- rbinom(n_exp1, 1, 0.5)         # Y ~ Bernoulli(0.5), indip. da X
 
-  res_hero[b, "leaky"]   <- cv_auc_leaky(X, y, k = k_hero, n_folds = FOLDS)
-  res_hero[b, "correct"] <- cv_auc_correct(X, y, k = k_hero, n_folds = FOLDS)
+  res_exp1[b, "leaky"]   <- cv_auc_leaky(X, y, k = k_exp1, n_folds = FOLDS)
+  res_exp1[b, "correct"] <- cv_auc_correct(X, y, k = k_exp1, n_folds = FOLDS)
 
   if (b %% 10 == 0) cat("  Run", b, "/", B, "\n")
 }
 
 # Statistiche riassuntive
-cat("\n--- Risultati Hero (n=200, p=500, k=20, B=", B, "run) ---\n")
-cat("AUC pipeline ERRATA  : media =", round(mean(res_hero[,"leaky"]),   3),
-    " | sd =", round(sd(res_hero[,"leaky"]),   3), "\n")
-cat("AUC pipeline CORRETTA: media =", round(mean(res_hero[,"correct"]), 3),
-    " | sd =", round(sd(res_hero[,"correct"]), 3), "\n")
+cat("\n--- Risultati Esperimento 1 (n=200, p=500, k=20, B=", B, "run) ---\n")
+cat("AUC pipeline ERRATA  : media =", round(mean(res_exp1[,"leaky"]),   3),
+    " | sd =", round(sd(res_exp1[,"leaky"]),   3), "\n")
+cat("AUC pipeline CORRETTA: media =", round(mean(res_exp1[,"correct"]), 3),
+    " | sd =", round(sd(res_exp1[,"correct"]), 3), "\n")
 cat("Ottimismo medio (AUC_errata - AUC_corretta):",
-    round(mean(res_hero[,"leaky"]) - mean(res_hero[,"correct"]), 3), "\n")
+    round(mean(res_exp1[,"leaky"]) - mean(res_exp1[,"correct"]), 3), "\n")
 ```
 
-```{r exp1-hero-plot, cache=TRUE, fig.height=4.5}
+```{r exp1-plot, cache=TRUE, fig.height=4.5}
 # Preparazione dati in formato long per ggplot2
-df_hero <- data.frame(res_hero) |>
+df_exp1 <- data.frame(res_exp1) |>
   pivot_longer(everything(), names_to = "pipeline", values_to = "auc") |>
   mutate(pipeline = factor(pipeline,
                            levels = c("leaky", "correct"),
                            labels = c("Pipeline Errata", "Pipeline Corretta")))
 
-# Boxplot affiancato — la "hero slide" del progetto
-p_hero_plot <- ggplot(df_hero, aes(x = pipeline, y = auc, fill = pipeline)) +
+p_exp1_plot <- ggplot(df_exp1, aes(x = pipeline, y = auc, fill = pipeline)) +
   geom_boxplot(width = 0.5, outlier.size = 1.5, alpha = 0.85) +
   geom_hline(yintercept = 0.5, linetype = "dashed", linewidth = 0.8,
              color = "grey30") +
@@ -540,7 +538,7 @@ p_hero_plot <- ggplot(df_hero, aes(x = pipeline, y = auc, fill = pipeline)) +
         plot.title    = element_text(face = "bold"),
         plot.subtitle = element_text(size = 9, color = "grey40"))
 
-print(p_hero_plot)
+print(p_exp1_plot)
 ```
 
 La figura mostra il risultato centrale del progetto: le due distribuzioni di AUC
@@ -664,7 +662,7 @@ di dimensione $p$. L'approssimazione è valida nel regime $p \gg k$, ossia
 quando il pool da cui si seleziona è molto più grande del sottoinsieme scelto.
 
 Nell'Esperimento 1 abbiamo usato $k = 20$ per massimizzare la drammaticità
-del risultato hero ($n=200$, $p=500$). Tuttavia, la griglia di validazione
+del risultato ($n=200$, $p=500$). Tuttavia, la griglia di validazione
 include anche $p=20$: con $k=20$ e $p=20$ si avrebbe $p = k$, ovvero la
 selezione includerebbe **tutti** i predittori disponibili e non avverrebbe
 nessuna vera selezione. In quel caso l'ottimismo è zero per costruzione,
@@ -918,7 +916,7 @@ struttura di dipendenza dei predittori.
 
 ---
 
-# # Esperimento 4 — Il Problema è Architetturale: il Criterio di Selezione Non Conta
+# Esperimento 4 — Il Problema è Architetturale: il Criterio di Selezione Non Conta
 
 Questo esperimento risponde a una domanda precisa: il problema del leakage dipende
 dall'*algoritmo* usato per costruire il ranking delle feature, o dal *punto* in cui
@@ -1045,7 +1043,7 @@ df_e4 <- data.frame(res_e4) |>
   mutate(
     pipeline = factor(pipeline,
       levels = c("filter_wrong", "ridge_filter_wrong", "ridge_filter_correct"),
-      labels = c("Filter (correlazione)\nSBACLIATO",
+      labels = c("Filter (correlazione)\nSBAGLIATO",
                  "Filter (Ridge importance)\nSBAGLIATO",
                  "Filter (Ridge importance)\nCORRETTO")),
     colore = if_else(grepl("CORRETTO", pipeline), "corretto", "sbagliato")
@@ -1053,8 +1051,8 @@ df_e4 <- data.frame(res_e4) |>
 ```
 
 ```{r exp4-plot, cache=TRUE, fig.height=5}
-# Grafico principale (scala completa — mostra l'effetto del filter)
-p_e4_full <- ggplot(df_e4, aes(x = pipeline, y = auc, fill = colore)) +
+# Grafico unico dei 3 metodi
+p_e4 <- ggplot(df_e4, aes(x = pipeline, y = auc, fill = colore)) +
   geom_boxplot(width = 0.5, outlier.size = 1.2, alpha = 0.85) +
   geom_hline(yintercept = 0.5, linetype = "dashed", linewidth = 0.8,
              color = "grey30") +
@@ -1064,28 +1062,17 @@ p_e4_full <- ggplot(df_e4, aes(x = pipeline, y = auc, fill = colore)) +
   ) +
   scale_y_continuous(limits = c(0.35, 1.0), breaks = seq(0.4, 1.0, 0.1)) +
   labs(
-    title    = "Scala completa: il filter domina il quadro",
-    x = NULL, y = "AUC stimato dalla CV"
-  ) +
-  theme(plot.title = element_text(face = "bold", size = 10))
-
-# Grafico zoomato (solo Ridge sbagliato vs corretto)
-df_ridge <- df_e4 |> filter(!grepl("Filter", pipeline))
-
-p_e4_combined <- p_e4_full +
-  plot_annotation(
     title    = "Metodi Embedded: il problema è architetturale, non algoritmico",
     subtitle = paste0("n = 50, p = 200 | B = ", B_e4,
-                      " run Monte Carlo | DGP: Y ⊥ X₁,...,X₅₀₀"),
-
-    theme = theme(
-      plot.title    = element_text(face = "bold"),
-      plot.subtitle = element_text(size = 9, color = "grey40"),
-      plot.caption  = element_text(size = 8, color = "grey50")
-    )
+                      " run Monte Carlo | DGP: Y \u22A5 X\u2081,...,X\u2085\u2080\u2080"),
+    x = NULL, y = "AUC stimato dalla CV"
+  ) +
+  theme(
+    plot.title    = element_text(face = "bold"),
+    plot.subtitle = element_text(size = 9, color = "grey40")
   )
 
-print(p_e4_combined)
+print(p_e4)
 ```
 
 Il grafico mostra il risultato atteso e teoricamente motivato: **il criterio di
