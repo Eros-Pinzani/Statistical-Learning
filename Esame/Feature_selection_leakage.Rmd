@@ -510,7 +510,7 @@ cat("Ottimismo medio (AUC_errata - AUC_corretta):",
     round(mean(res_exp1[,"leaky"]) - mean(res_exp1[,"correct"]), 3), "\n")
 ```
 
-```{r exp1-plot, cache=TRUE, fig.height=4.5}
+```{r exp1-plot, cache=TRUE, fig.width=4, fig.height=4.5}
 # Preparazione dati in formato long per ggplot2
 df_exp1 <- data.frame(res_exp1) |>
   pivot_longer(everything(), names_to = "pipeline", values_to = "auc") |>
@@ -522,15 +522,15 @@ p_exp1_plot <- ggplot(df_exp1, aes(x = pipeline, y = auc, fill = pipeline)) +
   geom_boxplot(width = 0.5, outlier.size = 1.5, alpha = 0.85) +
   geom_hline(yintercept = 0.5, linetype = "dashed", linewidth = 0.8,
              color = "grey30") +
-  annotate("text", x = 2.45, y = 0.51, label = "AUC casuale = 0.50",
-           size = 3.2, color = "grey30", hjust = 0) +
+  annotate("text", x = 0.75, y = 0.46, label = "AUC casuale",
+           size = 3.2, color = "grey30", hjust = 0.5) +
   scale_fill_manual(values = c("Pipeline Errata"   = "#e74c3c",
                                 "Pipeline Corretta" = "#2ecc71")) +
   scale_y_continuous(limits = c(0.40, 1.00), breaks = seq(0.4, 1.0, 0.1)) +
   labs(
     title    = "Pipeline Errata vs Pipeline Corretta",
     subtitle = paste0("n = 200, p = 500, k = 20 | B = ", B,
-                      " run Monte Carlo | DGP: Y ⊥ X₁,...,X₅₀₀"),
+                      " run Monte Carlo"),
     x = NULL, y = "AUC stimato dalla 10-fold CV",
     caption  = "La linea tratteggiata indica AUC = 0.50 (classificatore casuale)"
   ) +
@@ -710,7 +710,7 @@ cat("Coefficiente di calibrazione (a):", round(coef(lm_fit), 3), "\n")
 cat("R² (var. teorica → ottimismo sim.):", round(r_sq, 3), "\n")
 ```
 
-```{r exp2-plot, cache=TRUE, fig.height=5}
+```{r exp2-plot, cache=TRUE, fig.width=7, fig.height=5}
 # Punti simulati vs curva teorica
 p_theory <- ggplot(theory_df,
                     aes(x = teorico, y = ottimismo, color = factor(n))) +
@@ -722,20 +722,12 @@ p_theory <- ggplot(theory_df,
               aes(x = teorico, y = ottimismo)) +
   geom_point(size = 3.5, alpha = 0.9) +
   scale_color_brewer(palette = "Set1", name = "n") +
-  annotate("text", x = min(theory_df$teorico) * 1.02,
-           y = max(theory_df$ottimismo) * 0.95,
-           label = paste0("R² = ", round(r_sq, 3)),
-           size = 4.5, fontface = "bold", hjust = 0) +
   labs(
     title    = "Simulazione vs Previsione Teorica",
     subtitle = bquote("Predittore teorico:" ~ sqrt(2*log(p)/n) ~
                     "| k =" ~ .(k_theory) ~ "| B =" ~ .(B) ~ "run per cella"),
     x        = expression(sqrt(2 * log(p) / n) ~ "(predittore teorico)"),
-    y        = "Ottimismo simulato (AUC - 0.50)",
-    caption  = paste0(
-      "La linea tratteggiata è y=x (predizione perfetta); ",
-      "la linea piena è la retta di calibrazione stimata (senza intercetta)"
-    )
+    y        = "Ottimismo simulato (AUC - 0.50)"
   ) +
   theme(plot.title    = element_text(face = "bold"),
         plot.subtitle = element_text(size = 9, color = "grey40"))
@@ -863,7 +855,7 @@ cat("Struttura a blocchi | AUC leaky:", round(res_blocks$auc_leaky, 3),
     "| ottimismo:", round(res_blocks$ottimismo, 3), "\n")
 ```
 
-```{r exp3-plot, cache=TRUE, fig.height=4.5}
+```{r exp3-plot, cache=TRUE, fig.width=6 ,fig.height=4.5}
 # Confronto AR(1) vs iid
 df_ar1 <- res_ar1 |>
   pivot_longer(c(auc_leaky, auc_correct),
@@ -1050,7 +1042,7 @@ df_e4 <- data.frame(res_e4) |>
   )
 ```
 
-```{r exp4-plot, cache=TRUE, fig.height=5}
+```{r exp4-plot, cache=TRUE, fig.width=6, fig.height=5}
 # Grafico unico dei 3 metodi
 p_e4 <- ggplot(df_e4, aes(x = pipeline, y = auc, fill = colore)) +
   geom_boxplot(width = 0.5, outlier.size = 1.2, alpha = 0.85) +
