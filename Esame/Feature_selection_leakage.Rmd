@@ -770,18 +770,7 @@ predittore quantitativo robusto dell'ottimismo indotto dal leakage.
 
 ---
 
-# ⚠️ [APPENDICE — SLIDE DI BACKUP] Esperimento 3: Robustezza con Predittori Correlati
-
-> **NOTA PER LA PRESENTAZIONE:**
-> Questo esperimento è stato escluso dalle slide principali per ragioni di tempo
-> (10 minuti non sono sufficienti per 4 esperimenti + derivazione teorica).
-> Le analisi e le tabelle qui presenti devono essere tenute **in appendice**
-> come slide di backup, da mostrare **solo se la professoressa fa domande**
-> sulla robustezza del risultato con predittori correlati.
->
-> Il messaggio verbale nella slide delle conclusioni è:
-> *"Abbiamo verificato che la correlazione tra predittori peggiora il leakage,
-> non lo attenua"* — con questo esperimento a supporto se richiesto.
+# Esperimento 3: Robustezza con Predittori Correlati
 
 Tutti gli esperimenti precedenti usano predittori i.i.d. In pratica, i predittori
 sono quasi sempre correlati tra loro. Questo esperimento verifica se la correlazione
@@ -872,7 +861,7 @@ p_ar1 <- ggplot(df_ar1, aes(x = factor(rho), y = auc, fill = pipeline)) +
   scale_fill_manual(values = c("Errata" = "#e74c3c", "Corretta" = "#2ecc71"),
                     name = "Pipeline") +
   labs(
-    title    = "[BACKUP] Esperimento 3 — Struttura AR(1)",
+    title    = "Esperimento 3 — Struttura AR(1)",
     subtitle = paste0("n=", n_e3, ", p=", p_e3, ", k=", k_e3,
                       " | B=", B, " run | DGP: Y ⊥ X"),
     x = expression(rho ~ "(correlazione AR(1))"),
@@ -1023,7 +1012,7 @@ for (b in seq_len(B_e4)) {
 }
 
 # Riepilogo
-cat("\n--- Risultati Esperimento 4 (n=200, p=500, B=", B_e4, "run) ---\n")
+cat("\n--- Risultati Esperimento 4 (n=50,p=200, B=", B_e4, "run) ---\n")
 for (nm in colnames(res_e4)) {
   cat(nm, ": media =", round(mean(res_e4[, nm], na.rm = TRUE), 3),
       " | sd =", round(sd(res_e4[, nm], na.rm = TRUE), 3), "\n")
@@ -1056,7 +1045,7 @@ p_e4 <- ggplot(df_e4, aes(x = pipeline, y = auc, fill = colore)) +
   labs(
     title    = "Metodi Embedded: il problema è architetturale, non algoritmico",
     subtitle = paste0("n = 50, p = 200 | B = ", B_e4,
-                      " run Monte Carlo | DGP: Y \u22A5 X\u2081,...,X\u2085\u2080\u2080"),
+                      " run Monte Carlo | DGP: Y \u22A5 X\u2081,...,X\u2082\u2080\u2080"),
     x = NULL, y = "AUC stimato dalla CV"
   ) +
   theme(
@@ -1169,39 +1158,3 @@ identica procedura errata ha prodotto risultati fuorvianti:
 
 Questi studi si trovano, nella heatmap dell'Esperimento 1, nella zona rossa più
 profonda: $n \approx 40\text{–}100$, $p \approx 1000\text{–}10000$.
-
----
-
-# Riferimenti
-
-- **Ambroise C, McLachlan GJ (2002).** Selection bias in gene extraction on the
-  basis of microarray gene-expression data.
-  *Proceedings of the National Academy of Sciences, 99*(10), 6562–6566.
-
-- **Simon R, Radmacher MD, Dobbin K, McShane LM (2003).** Pitfalls in the use
-  of DNA microarray data for diagnostic and prognostic classification.
-  *Journal of the National Cancer Institute, 95*(1), 14–18.
-
-- **Hastie T, Tibshirani R, Friedman J (2009).** *The Elements of Statistical
-  Learning* (2nd ed.). Springer. — Cap. 7 (Model Assessment and Selection).
-
-- **James G, Witten D, Hastie T, Tibshirani R (2021).** *An Introduction to
-  Statistical Learning* (2nd ed.). Springer. — Cap. 5 (Resampling Methods),
-  Cap. 6 (Linear Model Selection and Regularization).
-
-- **Hoerl AE, Kennard RW (1970).** Ridge regression: biased estimation for
-  nonorthogonal problems.
-  *Technometrics, 12*(1), 55–67.
-  (Articolo fondativo della Ridge Regression.)
-
-- **Friedman J, Hastie T, Tibshirani R (2010).** Regularization paths for
-  generalized linear models via coordinate descent.
-  *Journal of Statistical Software, 33*(1), 1–22.
-  (Documentazione pacchetto `glmnet`.)
-
----
-
-```{r session-info, echo=FALSE}
-cat("--- Informazioni sulla sessione R ---\n")
-sessionInfo()
-```
