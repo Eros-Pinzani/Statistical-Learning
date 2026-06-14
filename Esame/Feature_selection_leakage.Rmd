@@ -448,24 +448,6 @@ gen_ar1 <- function(n, p, rho) {
   }
   X
 }
-
-# Predittori a struttura a blocchi:
-# all'interno di ogni blocco cor(Xi, Xj) = rho_within
-# tra blocchi diversi: indipendenti
-gen_blocks <- function(n, p, n_blocks = 10, rho_within = 0.8) {
-  stopifnot(p %% n_blocks == 0)
-  bsize <- p %/% n_blocks
-  X     <- matrix(0, n, p)
-  for (b in seq_len(n_blocks)) {
-    idx <- ((b - 1) * bsize + 1):(b * bsize)
-    fac <- rnorm(n)                    # fattore comune al blocco
-    for (j in idx) {
-      # Decompone in componente comune + rumore idiosincratico
-      X[, j] <- sqrt(rho_within) * fac + sqrt(1 - rho_within) * rnorm(n)
-    }
-  }
-  X
-}
 ```
 
 ---
@@ -812,36 +794,6 @@ for (i in seq_along(rho_vals)) {
 
 res_ar1$ottimismo <- res_ar1$auc_leaky - res_ar1$auc_correct
 print(res_ar1)
-```
-
-## Struttura a Blocchi
-
-```{r exp3-blocks, cache=TRUE}
-# 10 blocchi di p/10 = 10 variabili ciascuno; correlazione intra-blocco = 0.8
-# p deve essere multiplo di 10
-p_blocks <- 100   # 10 blocchi da 10 variabili
-n_blocks_e3 <- 10
-rho_within  <- 0.8
-
-auc_l_blk <- auc_c_blk <- numeric(B)
-for (b in seq_len(B)) {
-  set.seed(SEED + b + 2e5)
-  X <- gen_blocks(n_e3, p_blocks, n_blocks = n_blocks_e3, rho_within = rho_within)
-  y <- rbinom(n_e3, 1, 0.5)
-  auc_l_blk[b] <- cv_auc_leaky(X, y, k = k_e3, n_folds = FOLDS)
-  auc_c_blk[b] <- cv_auc_correct(X, y, k = k_e3, n_folds = FOLDS)
-}
-
-res_blocks <- data.frame(
-  struttura    = "Blocchi (rho_within=0.8)",
-  auc_leaky    = mean(auc_l_blk,  na.rm = TRUE),
-  auc_correct  = mean(auc_c_blk,  na.rm = TRUE),
-  ottimismo    = mean(auc_l_blk,  na.rm = TRUE) - mean(auc_c_blk, na.rm = TRUE)
-)
-
-cat("Struttura a blocchi | AUC leaky:", round(res_blocks$auc_leaky, 3),
-    "| AUC correct:", round(res_blocks$auc_correct, 3),
-    "| ottimismo:", round(res_blocks$ottimismo, 3), "\n")
 ```
 
 ```{r exp3-plot, cache=TRUE, fig.width=6 ,fig.height=4.5}
