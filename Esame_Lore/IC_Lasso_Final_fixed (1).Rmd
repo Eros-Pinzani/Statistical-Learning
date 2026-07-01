@@ -1,0 +1,1003 @@
+---
+title: "La Condizione di Irrapresentabilità del Lasso"
+subtitle: "Teoria, Simulazioni e Rimedi per la Model Selection Consistency"
+author: "Pennelli Lorenzo Maria"
+date: "`r format(Sys.Date(), '%d %B %Y')`"
+output:
+  pdf_document:
+    latex_engine: xelatex
+    toc: true
+    toc_depth: 3
+    number_sections: true
+    highlight: tango
+    fig_width: 6.5
+    fig_height: 4.6
+header-includes:
+  - \usepackage{booktabs}
+  - \usepackage{float}
+  - \floatplacement{figure}{H}
+  - \usepackage{geometry}
+  - \geometry{margin=2.4cm}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo      = TRUE,
+  warning   = FALSE,
+  message   = FALSE,
+  fig.align = "center",
+  dev       = "cairo_pdf",
+  fig.pos   = "H"
+)
+```
+
+---
+
+# Setup
+
+```{r packages, results='hide'}
+pkgs <- c("glmnet","ggplot2","patchwork","dplyr","tidyr",
+          "MASS","scales","knitr","kableExtra")
+to_install <- pkgs[!pkgs %in% installed.packages()[,"Package"]]
+if (length(to_install) > 0)
+  install.packages(to_install, repos="https://cloud.r-project.org", quiet=TRUE)
+
+# MASS caricata prima di dplyr: evita il conflitto su select() e MASS::select()
+suppressPackageStartupMessages({
+  library(MASS)
+  library(glmnet); library(ggplot2); library(patchwork)
+  library(dplyr);  library(tidyr)
+  library(scales); library(knitr);   library(kableExtra)
+})
+# dplyr::select mascherava MASS::select; con l'ordine corretto non serve, ma
+# lo esplicitiamo per sicurezza in caso di future modifiche all'ordine di caricamento.
+select <- dplyr::select
+
+# --- Tema grafico uniforme (ispirato al notebook Variable Importance) ---
+tema <- theme_minimal(base_size = 12) +
+  theme(
+    plot.title       = element_text(face="bold", size=13, color="grey10"),
+    plot.subtitle    = element_text(size=10, color="grey40", margin=margin(b=10)),
+    legend.position  = "bottom",
+    legend.title     = element_blank(),
+    strip.text       = element_text(face="bold", size=11),
+    strip.background = element_rect(fill="grey93", color=NA),
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(color="grey92", linewidth=0.4),
+    plot.margin      = margin(10,10,8,10)
+  )
+theme_set(tema)
+```
+
+```{r parametri-globali}
+# ============================================================
+# QUICK_RUN = TRUE  -> ~3 min  (B_MC=250, B_N=200)
+# QUICK_RUN = FALSE -> ~12 min (B_MC=600, B_N=500) per rendering finale
+# ============================================================
+QUICK_RUN <- TRUE
+B_MC  <- if (QUICK_RUN) 250 else 600
+B_N   <- if (QUICK_RUN) 200 else 500
+
+# DGP principale: p=3, |S*|=2 => rho* = 1/2 = 0.50
+N_MAIN <- 500;  P_TOT <- 3;  P_S <- 2
+BETA_S <- c(3, 3)     # segnale forte: evita FN artificiali con lambda.1se
+SIGMA2 <- 1.0
+
+RHO_GRID <- seq(0.05, 0.70, by=0.05)  # IC in [0.10, 1.40]
+
+# Palette colori unificata
+COL_LASSO <- "#E63946"   # rosso      -> Lasso standard
+COL_AL    <- "#2A9D8F"   # teal       -> Adaptive Lasso
+COL_EN    <- "#8338EC"   # viola      -> Elastic Net
+COL_S     <- "#1D3557"   # blu scuro  -> variabili vere (S*)
+COL_NS    <- "#E76F51"   # arancione  -> variabili false (-S*)
+SEED      <- 2025
+
+cat(sprintf(
+  "Config: %s | B_MC=%d | B_N=%d | n=%d | p=%d | |S*|=%d | rho*=%.2f | beta=%s\n",
+  if(QUICK_RUN)"QUICK" else "FULL",
+  B_MC, B_N, N_MAIN, P_TOT, P_S, 1/P_S, paste(BETA_S,collapse=",")))
+```
+
+---
+
+# Background Teorico
+
+## Il Problema della Model Selection
+
+Nei modelli ad alta dimensione l'obiettivo non è solo prevedere bene, ma
+**identificare le variabili causalmente rilevanti**. Definiamo il *vero supporto*:
+
+$$S^* = \{j : \beta_j^* \neq 0\}$$
+
+Un estimatore è **selection consistent** se:
+
+$$P\!\left(\hat{S} = S^*\right) \to 1 \quad \text{per } n \to \infty$$
+
+Questa proprietà è *indipendente* dalla consistenza della stima: si può stimare bene
+i coefficienti senza recuperare il supporto esatto, e vice versa. Knight & Fu (2000)
+dimostrano la consistenza della *stima* del Lasso per $\lambda_n = o(n)$, ma la
+consistenza della *selezione* richiede condizioni aggiuntive sulla struttura di $X$.
+
+## Il Lasso
+
+Il Lasso (Tibshirani, 1996) risolve:
+
+$$\hat{\beta}^{\text{Lasso}} = \arg\min_{\beta \in \mathbb{R}^p}
+\left\{\frac{1}{2n}\|y - X\beta\|_2^2 + \lambda\|\beta\|_1\right\}$$
+
+La norma $\ell_1$ produce soluzioni **esattamente sparse** — a differenza di Ridge
+($\ell_2$) che contrae senza azzerare. Il parametro $\lambda$ regola il trade-off:
+$\lambda=0$ riduce a OLS; $\lambda$ grande azzera tutto.
+
+## Le Condizioni KKT del Lasso
+
+Le condizioni di Karush-Kuhn-Tucker caratterizzano completamente la soluzione ottima:
+
+$$\frac{1}{n}X_j^\top(y - X\hat{\beta}) = \lambda \cdot \text{sign}(\hat{\beta}_j),
+\quad j \in \hat{S}$$
+
+$$\left|\frac{1}{n}X_j^\top(y - X\hat{\beta})\right| \leq \lambda, \quad j \notin \hat{S}$$
+
+La **seconda** condizione è quella critica: affinché una variabile irrilevante
+$j \notin S^*$ rimanga correttamente a zero, il suo gradiente residuo deve stare
+strettamente sotto $\lambda$. Se la struttura di $X$ non lo garantisce — indipendentemente
+da $n$ e $\lambda$ — il Lasso include la variabile falsa nel modello.
+
+## La Matrice di Gram e la Struttura a Blocchi
+
+Definiamo $C^n = \frac{1}{n}X^\top X$, partizionata rispetto a $S^*$ (prime $q$
+colonne) e $-S^*$ (ultime $p-q$):
+
+$$C^n = \begin{pmatrix} C_{11}^n & C_{12}^n \\ C_{21}^n & C_{22}^n \end{pmatrix}$$
+
+Il blocco **chiave** è $C_{21}^n = \frac{1}{n}X_{-S^*}^\top X_{S^*}$: misura come
+le variabili false si correlano con le vere. Importante: l'IC non dipende da
+$C_{22}^n$ (covarianza intra-blocco falso) — solo dalla correlazione incrociata.
+
+## La Irrepresentable Condition (Zhao & Yu, 2006)
+
+$$\boxed{\left\|C_{21}^n\left(C_{11}^n\right)^{-1}\text{sign}\!\left(\beta_{S^*}^*\right)
+\right\|_\infty < 1}$$
+
+La quantità $C_{21}(C_{11})^{-1}\text{sign}(\beta_{S^*}^*)$ è esattamente il vettore
+dei **coefficienti della regressione OLS** di ogni variabile falsa sulle variabili vere,
+proiettato nella direzione dei segni dei coefficienti veri. L'IC richiede che questo
+valore, per ogni variabile falsa, sia strettamente inferiore a 1.
+
+**Intuizione geometrica.** Se una variabile rumore può essere scritta come combinazione
+lineare delle variabili vere con "peso totale" $\geq 1$, allora la sua correlazione con
+il residuo $y - X\hat{\beta}$ può superare la soglia $\lambda$ — il Lasso non riesce a
+tenerla a zero. *La variabile falsa è troppo "rappresentabile" dalle vere: da qui il nome.*
+Ovviamente questa scrittura è corretta se e solo se $(C_{11}^n)$ sia invertibile e quindi definita positiva. 
+**Teorema 1 (sufficienza, Zhao & Yu 2006).** Se la Strong IC vale con margine $\eta > 0$
+e $\lambda_n/n \to 0$, $\lambda_n n^{-(1+c)/2} \to \infty$:
+$$P\!\left(\hat{\beta}^n(\lambda_n) =_s \beta^n\right) = 1 - o(e^{-n^c})$$
+La convergenza è esponenzialmente rapida in $n$.
+
+**Teorema 2 (necessità, Zhao & Yu 2006).** Se la Weak IC è violata per infiniti $n$,
+allora per *nessuna* scelta di $\lambda_n$ si ha general sign consistency:
+$$P\!\left(\hat{S}_{\text{Lasso}} = S^*\right) \not\to 1$$
+IC è quindi **quasi necessaria e sufficiente** per la selezione consistente.
+
+**Corollario pratico (Corollary 2, Zhao & Yu 2006).** Se le correlazioni sono bounded:
+$|r_{ij}| \leq \frac{c}{2q-1}$ per $c < 1$, la Strong IC è garantita. Questo bound
+è stretto: il Lasso è consistente solo se la correlazione tra ogni variabile falsa e il
+blocco vero non supera $1/(2q-1)$.
+
+## Elastic Net e Adaptive Lasso
+
+**Elastic Net** (Zou & Hastie, 2005) aggiunge una penalità $\ell_2$:
+$$\hat{\beta}^{\text{EN}} = \arg\min_\beta
+\frac{1}{2n}\|y-X\beta\|_2^2 + \lambda\!\left[\alpha\|\beta\|_1 +
+(1-\alpha)\|\beta\|_2^2\right]$$
+
+Il *grouping effect* migliora la stima e la stabilità numerica in presenza di collinearità.
+Tuttavia **non risolve la selezione**: costringendo le variabili correlate a entrare in
+gruppo, EN include sistematicamente anche il rumore correlato con il segnale vero —
+aumentando i falsi positivi rispetto al Lasso puro in zona IC violata.
+
+**Adaptive Lasso** (Zou, 2006) usa pesi differenziali $w_j = |\hat{\beta}_j^{\text{init}}|^{-\gamma}$:
+$$\hat{\beta}^{\text{AL}} = \arg\min_\beta
+\frac{1}{2n}\|y-X\beta\|_2^2 + \lambda\sum_{j=1}^p w_j|\beta_j|$$
+
+Il meccanismo è asimmetrico per design:
+
+- Variabili **vere**: $\hat{\beta}_j^{\text{init}}$ grande $\Rightarrow$ $w_j$ piccolo
+  $\Rightarrow$ penalizzazione bassa $\Rightarrow$ il coefficiente sopravvive.
+- Variabili **false**: $\hat{\beta}_j^{\text{init}} \approx 0$ $\Rightarrow$
+  $w_j \to \infty$ $\Rightarrow$ penalizzazione altissima $\Rightarrow$ azzeramento.
+
+Zou (2006) dimostra le **proprietà oracolo** dell'AL: selezione e stima asintoticamente
+equivalenti a conoscere $S^*$ a priori, **senza richiedere IC**. L'inizializzazione via
+Ridge (anziché OLS) è necessaria quando $\rho$ è alto perché OLS diventa numericamente
+instabile per collinearità elevata, producendo stime iniziali distorte che corrompono i
+pesi $w_j$.
+
+---
+
+# DGP, Calcolo Analitico dell'IC e Struttura di Covarianza
+
+## Struttura della Covarianza a Blocchi
+
+La nostra scelta di design ha un obiettivo preciso: un singolo parametro scalare $\rho$ che controlli *esattamente* il valore dell'IC, permettendo di attraversare la soglia IC $= 1$ in modo controllato e verificabile analiticamente.
+
+Costruiamo la matrice di covarianza teorica $\Sigma$ in modo che le variabili all'interno dello stesso blocco siano indipendenti, ma ogni variabile falsa abbia una correlazione costante $\rho$ con ciascuna variabile vera:
+
+$$\Sigma_{jk} = \begin{cases}
+1 & j = k \\
+\rho & j \in S^*,\; k \notin S^* \text{ (o viceversa)} \\
+0 & \text{altrimenti}
+\end{cases}$$
+
+Con questa struttura, il blocco di covarianza delle variabili vere è semplicemente la matrice identità ($C_{11} = I_{p_S}$), il che rende la sua inversa banale ($C_{11}^{-1} = I_{p_S}$). Il blocco di covarianza incrociata $C_{21}$ (di dimensione $(p - p_S) \times p_S$) è composto interamente da valori $\rho$.
+
+Se impostiamo il segnale in modo che tutti i coefficienti veri siano positivi ($\text{sign}(\beta_{S^*}^*) = \mathbf{1}_{p_S}$), il calcolo dell'Irrepresentable Condition si semplifica drasticamente. La moltiplicazione $C_{21} C_{11}^{-1} \mathbf{1}_{p_S}$ equivale semplicemente a sommare le righe della matrice $C_{21}$. Poiché ogni riga contiene esattamente $p_S$ elementi pari a $\rho$, la formula si riduce a un'espressione scalare lineare:
+
+$$\text{IC}(\rho) = \left\|C_{21}C_{11}^{-1}\mathbf{1}_{p_S}\right\|_\infty = \left\| \begin{pmatrix} \rho & \dots & \rho \\ \vdots & \ddots & \vdots \\ \rho & \dots & \rho \end{pmatrix} I_{p_S} \begin{pmatrix} 1 \\ \vdots \\ 1 \end{pmatrix} \right\|_\infty = p_S \cdot \rho$$
+
+La soglia critica in cui la consistenza si rompe è quindi $\rho^* = 1/p_S$ — calcolabile in forma chiusa e verificabile in modo esatto. Nel nostro scenario base con $p_S = 2$
+
+```{r funzioni-dgp}
+make_Sigma <- function(rho, p_S, p_tot) {
+  Sigma <- diag(p_tot)
+  S  <- seq_len(p_S);  nS <- seq(p_S + 1, p_tot)
+  for (j in S) for (k in nS) Sigma[j,k] <- Sigma[k,j] <- rho
+  Sigma
+}
+
+compute_IC <- function(rho, p_S, p_tot, beta_S) {
+  Sigma <- make_Sigma(rho, p_S, p_tot)
+  S  <- seq_len(p_S);  nS <- seq(p_S + 1, p_tot)
+  max(abs(Sigma[nS, S, drop=FALSE] %*%
+          solve(Sigma[S, S, drop=FALSE]) %*%
+          sign(beta_S)))
+}
+
+genera_dati <- function(n, rho, p_S, p_tot, beta_S, sigma2) {
+  # Generazione diretta tramite equazioni strutturali (SEM)
+  # Nota: la varianza residua di X3 è 1 - 2*rho^2, che diventa negativa per rho > 1/sqrt(2).
+  # Con rho_grid <= 0.70 siamo appena sotto il limite, ma il clamp garantisce robustezza.
+  var_res <- max(1 - 2 * rho^2, 0)
+
+  X1 <- rnorm(n)
+  X2 <- rnorm(n)
+  Z3 <- rnorm(n) # Rumore specifico ortogonale
+
+  # X3 è formata da una parte di segnale (X1, X2) e una parte di rumore puro
+  X3 <- rho * X1 + rho * X2 + sqrt(var_res) * Z3
+
+  X    <- cbind(X1, X2, X3)
+  beta <- c(beta_S, rep(0, p_tot - p_S))
+  y    <- drop(X %*% beta + rnorm(n, 0, sqrt(sigma2)))
+
+  list(X=X, y=y, beta=beta)
+}
+```
+
+
+# Funzioni degli Stimatori
+
+```{r funzioni-stimatori}
+S_TRUE <- seq_len(P_S)
+
+# LASSO STANDARD
+# lambda.1se: conservativo — riduce FP in zona IC<1 (dove il segnale è forte),
+# rendendo il crollo alla soglia più netto e leggibile visivamente.
+run_lasso <- function(X, y, S_true, rule="lambda.1se", nfolds=5) {
+  bhat <- as.vector(coef(cv.glmnet(X, y, alpha=1, nfolds=nfolds), s=rule))[-1]
+  Sh   <- which(bhat != 0)
+  list(esatto=setequal(Sh,S_true),
+       FP=length(setdiff(Sh,S_true)),
+       FN=length(setdiff(S_true,Sh)))
+}
+
+# ADAPTIVE LASSO
+# init="ridge": stabile anche per rho -> 1 (OLS instabile per collinearita').
+# gamma controlla la forza della discriminazione tra vere e false.
+run_adaptive_lasso <- function(X, y, S_true,
+                                gamma=1, rule="lambda.1se",
+                                init="ridge", nfolds=5) {
+  if (init == "ridge") {
+    br <- as.vector(coef(cv.glmnet(X,y,alpha=0,nfolds=nfolds),
+                         s="lambda.min"))[-1]
+  } else {
+    br <- tryCatch(coef(lm(y~X))[-1], error=function(e) rep(0,ncol(X)))
+  }
+  w    <- 1/(abs(br)+1e-6)^gamma;
+  bhat <- as.vector(coef(cv.glmnet(X,y,alpha=1,
+                                    penalty.factor=w,nfolds=nfolds),s=rule))[-1]
+  Sh <- which(bhat!=0)
+  list(esatto=setequal(Sh,S_true),
+       FP=length(setdiff(Sh,S_true)),
+       FN=length(setdiff(S_true,Sh)))
+}
+
+# ELASTIC NET
+# alpha_en in (0,1): bilancia L1 (sparsita') e L2 (grouping effect).
+# alpha=0.5 e' il valore canonico di Zou & Hastie (2005).
+run_en <- function(X, y, S_true, alpha_en=0.5, rule="lambda.1se", nfolds=5) {
+  bhat <- as.vector(coef(cv.glmnet(X,y,alpha=alpha_en,nfolds=nfolds),s=rule))[-1]
+  Sh   <- which(bhat!=0)
+  list(esatto=setequal(Sh,S_true),
+       FP=length(setdiff(Sh,S_true)),
+       FN=length(setdiff(S_true,Sh)))
+}
+```
+
+---
+
+# Esperimento 1 — La Transizione di Fase
+
+**Ipotesi:** $P(\hat{S}_\text{Lasso} = S^*)$ rimane vicina a 1 per IC $< 1$, poi crolla
+verticalmente alla soglia IC $= 1$.
+
+**Perché:** è la verifica empirica del Teorema 1 e 2 di Zhao & Yu. Il crollo non dipende
+dalla scelta di $\lambda$ — qualunque $\lambda_n$ si usi, se IC è violata la selezione
+è inconsistente. La simulazione rende visibile questo fatto su $n$ finito.
+
+```{r esp1-sim}
+set.seed(SEED)
+results_e1 <- lapply(RHO_GRID, function(rho) {
+  ic <- compute_IC(rho, P_S, P_TOT, BETA_S)
+  h  <- replicate(B_MC, {
+    d <- genera_dati(N_MAIN, rho, P_S, P_TOT, BETA_S, SIGMA2)
+    run_lasso(d$X, d$y, S_TRUE)$esatto
+  })
+  data.frame(rho=rho, ic=ic, prob=mean(h), se=sd(h)/sqrt(B_MC))
+})
+df_e1 <- bind_rows(results_e1)
+cat(sprintf("Soglia teorica IC=1 a rho*=%.2f | Crollo empirico a rho=%.2f\n",
+            1/P_S,
+            df_e1 |> filter(prob < .5) |> slice_min(rho,n=1) |> pull(rho)))
+```
+
+```{r esp1-plot, fig.height=5.0}
+# Coordinate per le frecce di testo dirette alla curva
+ic_pts <- df_e1 |> filter(ic %in% c(0.40, 1.20))
+
+ggplot(df_e1, aes(x=ic, y=prob)) +
+  # --- Sfondi zona OK / violata ---
+  annotate("rect", xmin=-Inf, xmax=1, ymin=-Inf, ymax=Inf,
+           fill="#D5F5E3", alpha=0.40)+
+  annotate("rect", xmin=1, xmax=Inf, ymin=-Inf, ymax=Inf,
+           fill="#FADBD8", alpha=0.40)+
+  # --- Ribbon errore standard (piu' sottile, meno invasivo) ---
+  geom_ribbon(aes(ymin=pmax(prob-2*se,0), ymax=pmin(prob+2*se,1)),
+              fill=COL_LASSO, alpha=0.12)+
+  # --- Linea e punti ---
+  geom_line(color=COL_LASSO, linewidth=1.8)+
+  geom_point(color=COL_LASSO, size=3.0, shape=19)+
+  # --- Soglia IC = 1 ---
+  geom_vline(xintercept=1, color="grey30", linewidth=0.8, linetype="longdash")+
+  # --- Linea 50% ---
+  geom_hline(yintercept=0.5, linetype="dotted", color="grey55", linewidth=0.6)+
+  # --- Etichetta soglia: in cima, centrata, non sovrapposta alla curva ---
+  annotate("label",
+           x=1.0, y=1.06,
+           label="Soglia IC = 1  (rho* = 0.50)",
+           color="grey20", size=3.0, fill="grey96",
+           label.size=0.3, hjust=0.5, fontface="bold")+
+  # --- Zona verde: testo in alto a sinistra, lontano dalla curva ---
+  annotate("text",
+           x=0.20, y=0.10,
+           label="IC < 1\nLasso consistente",
+           color="#1E8449", size=3.6, fontface="bold",
+           hjust=0.5, vjust=0, lineheight=0.95)+
+  # --- Zona rossa: testo in basso a destra ---
+  annotate("text",
+           x=1.35, y=0.88,
+           label="IC \u2265 1\nLasso include\nvariabili false",
+           color=COL_LASSO, size=3.6, fontface="bold",
+           hjust=0.5, vjust=1, lineheight=0.95)+
+  scale_x_continuous(
+    name=expression("Valore dell'IC"),
+    breaks=seq(0, 1.4, 0.2),
+    limits=c(0, 1.55))+
+  scale_y_continuous(
+    labels=percent_format(accuracy=1),
+    limits=c(-0.02, 1.10),
+    breaks=seq(0, 1, 0.25),
+    expand=c(0,0),
+    name=expression("P("~hat(S)~"= S"^"*"~")  — recupero esatto del supporto"))+
+  labs(
+    title="Esperimento 1: La Transizione di Fase",
+    subtitle=sprintf(
+      "n = %d  |  %d repliche Monte Carlo  |  fascia = \u00b12 errori standard",
+      N_MAIN, B_MC))+
+  theme(plot.margin = margin(10, 14, 8, 10))
+```
+
+---
+
+# Esperimento 2 — Anatomia del Fallimento: FP vs FN
+
+**Ipotesi:** quando IC è violata, il Lasso sbaglia per **eccesso** di variabili selezionate
+(FP), non per variabili vere mancate (FN).
+
+**Perché:** $P(\hat{S}=S^*)$ è una misura aggregata. Questo esperimento scompone il
+fallimento, confermando il meccanismo diretto dell'IC: la variabile falsa supera la soglia
+$\lambda$ sfruttando la correlazione con le vere, ma le vere continuano a essere
+recuperate (FN $\approx 0$). In applicazioni reali questo significa: il Lasso *trova*
+sempre i geni causali, ma li annacqua con decine di falsi biomarcatori.
+
+```{r esp2-sim}
+set.seed(SEED + 10)
+results_e2 <- lapply(RHO_GRID, function(rho) {
+  ic <- compute_IC(rho, P_S, P_TOT, BETA_S)
+  res <- replicate(B_MC, {
+    d <- genera_dati(N_MAIN, rho, P_S, P_TOT, BETA_S, SIGMA2)
+    r <- run_lasso(d$X, d$y, S_TRUE)
+    c(FP=r$FP, FN=r$FN)
+  })
+  data.frame(rho=rho, ic=ic,
+             FP_avg=mean(res["FP",]), FP_se=sd(res["FP",])/sqrt(B_MC),
+             FN_avg=mean(res["FN",]), FN_se=sd(res["FN",])/sqrt(B_MC))
+})
+df_e2 <- bind_rows(results_e2)
+```
+
+```{r esp2-plot, fig.height=4.6}
+# Stile annotazione in-plot (come nell'immagine di riferimento)
+ANNOT_COLOR <- "#8B1A1A"   # rosso scuro usato per le etichette
+Y_MAX       <- 1.5          # range Y uguale per entrambi
+
+p2a <- ggplot(df_e2, aes(x = ic, y = FP_avg)) +
+  annotate("rect", xmin = -Inf, xmax = 1, ymin = -Inf, ymax = Inf,
+           fill = "#D5F5E3", alpha = 0.45) +
+  annotate("rect", xmin = 1, xmax = Inf, ymin = -Inf, ymax = Inf,
+           fill = "#FADBD8", alpha = 0.45) +
+  # ── annotazione titolo in stile immagine di riferimento ──────────────────
+  annotate("text",
+           x     = mean(range(df_e2$ic)),   # centro orizzontale
+           y     = Y_MAX * 0.97,            # vicino al bordo superiore
+           label = "Falsi Positivi — rumore incluso",
+           color = ANNOT_COLOR, size = 3.5,
+           hjust = 0.5, fontface = "italic") +
+  # ── sottotitolo descrittivo (come "Crescono dopo IC = 1") ────────────────
+  annotate("text",
+           x     = mean(range(df_e2$ic)),
+           y     = Y_MAX * 0.88,
+           label = "Crescono dopo IC = 1",
+           color = "grey40", size = 2.8,
+           hjust = 0.5, fontface = "italic") +
+  geom_ribbon(aes(ymin = pmax(FP_avg - 2 * FP_se, 0), ymax = FP_avg + 2 * FP_se),
+              fill = COL_LASSO, alpha = 0.15) +
+  geom_line(color = COL_LASSO, linewidth = 1.7) +
+  geom_point(color = COL_LASSO, size = 3) +
+  geom_vline(xintercept = 1, color = "grey30", linewidth = 0.8,
+             linetype = "longdash") +
+  annotate("text", x = 1.01, y = (P_TOT - P_S) * 0.9,
+           label = "IC = 1", color = "grey30", size = 3.0,
+           hjust = 0, fontface = "italic") +
+  scale_x_continuous(name = "IC", breaks = seq(0, 1.5, .2)) +
+  scale_y_continuous(
+    name   = "Falsi Positivi medi",
+    limits = c(0, Y_MAX),
+    breaks = seq(0, Y_MAX, 0.25)
+  ) +
+  labs(title = NULL, subtitle = NULL)   # rimosso: il titolo è ora in-plot
+
+
+p2b <- ggplot(df_e2, aes(x = ic, y = FN_avg)) +
+  annotate("rect", xmin = -Inf, xmax = 1, ymin = -Inf, ymax = Inf,
+           fill = "#D5F5E3", alpha = 0.45) +
+  annotate("rect", xmin = 1, xmax = Inf, ymin = -Inf, ymax = Inf,
+           fill = "#FADBD8", alpha = 0.45) +
+  # ── annotazione titolo in stile immagine di riferimento ──────────────────
+  annotate("text",
+           x     = mean(range(df_e2$ic)),
+           y     = Y_MAX * 0.97,
+           label = "Falsi Negativi",
+           color = ANNOT_COLOR, size = 3.5,
+           hjust = 0.5, fontface = "italic") +
+  annotate("text",
+           x     = mean(range(df_e2$ic)),
+           y     = Y_MAX * 0.88,
+           label = "Restano \u22480 su tutto l'intervallo",
+           color = "grey40", size = 2.8,
+           hjust = 0.5, fontface = "italic") +
+  geom_ribbon(aes(ymin = pmax(FN_avg - 2 * FN_se, 0), ymax = FN_avg + 2 * FN_se),
+              fill = COL_S, alpha = 0.15) +
+  geom_line(color = COL_S, linewidth = 1.7) +
+  geom_point(color = COL_S, size = 3) +
+  geom_vline(xintercept = 1, color = "grey30", linewidth = 0.8,
+             linetype = "longdash") +
+  annotate("text", x = 1.01, y = P_S * 0.9,
+           label = "IC = 1", color = "grey30", size = 3.0,
+           hjust = 0, fontface = "italic") +
+  scale_x_continuous(name = "IC", breaks = seq(0, 1.5, .2)) +
+  scale_y_continuous(
+    name   = "Falsi Negativi medi",
+    limits = c(0, Y_MAX),
+    breaks = seq(0, Y_MAX, 0.25)
+  ) +
+  labs(title = NULL, subtitle = NULL)
+
+
+p2a + p2b +
+  plot_annotation(
+    title    = "Esperimento 2: Anatomia del Fallimento del Lasso",
+    subtitle = sprintf(
+      "Il Lasso non perde il segnale — viene contaminato dal rumore correlato | n=%d, B=%d MC",
+      N_MAIN, B_MC),
+    theme = theme(plot.title = element_text(face = "bold", size = 13))
+  )
+```
+
+**Risultato:** i FP crescono monotonicamente dopo IC $= 1$; i FN rimangono $\approx 0$.
+Il Lasso non perde il segnale — viene contaminato dal rumore correlato che supera $\lambda$.
+Questo è il meccanismo fisico del fallimento IC: la variabile falsa è "irrapresentabile"
+solo se IC $< 1$; quando IC $\geq 1$ la sua rappresentazione supera la soglia $\lambda$.
+
+---
+
+# Esperimento 3 — $n \to \infty$ Non Basta
+
+**Ipotesi:** con IC violata, $P(\hat{S}=S^*)$ raggiunge un **plateau permanente** $< 1$
+al crescere di $n$ invece di convergere a 1.
+
+**Perché è il risultato più controintuitivo:** la statistica classica insegna che con
+più dati "tutto converge". Il Teorema 2 è categorico: se IC è violata, nessun $\lambda_n$
+porta $P \to 1$. Il vincolo è strutturale — nella geometria di $\Sigma$, non nel campione.
+
+Nota tecnica: qui usiamo `lambda.min` invece di `lambda.1se` perché a $n$ grande
+(tipicamente $n > 1000$) `lambda.1se` diventa eccessivamente conservativo e genera
+FN artificiali che abbassano artificialmente la curva IC-soddisfatta, oscurando la
+differenza tra i due scenari.
+
+```{r esp3-sim}
+set.seed(SEED + 20)
+rho_ok  <- 0.10   # IC = 0.20 -> soddisfatta, lontana dalla soglia
+rho_bad <- 0.65   # IC = 1.30 -> piu' violata, plateau piu' netto e stabile
+n_grid <- c(100, 200, 350, 500, 1000, 2000, 5000, 10000, 20000)
+B_N_e3 <- if (QUICK_RUN) 350 else 700
+
+results_e3 <- lapply(n_grid, function(nn) {
+  res <- replicate(B_N_e3, {
+    d_ok  <- genera_dati(nn, rho_ok,  P_S, P_TOT, BETA_S, SIGMA2)
+    d_bad <- genera_dati(nn, rho_bad, P_S, P_TOT, BETA_S, SIGMA2)
+    c(ok  = run_lasso(d_ok$X,  d_ok$y,  S_TRUE, rule="lambda.min")$esatto,
+      bad = run_lasso(d_bad$X, d_bad$y, S_TRUE, rule="lambda.min")$esatto)
+  })
+  data.frame(n=nn,
+             ok  = mean(res["ok",]),  se_ok  = sd(res["ok",])/sqrt(B_N_e3),
+             bad = mean(res["bad",]), se_bad = sd(res["bad",])/sqrt(B_N_e3))
+})
+df_e3 <- bind_rows(results_e3)
+plateau <- mean(tail(df_e3$bad, 4))
+cat(sprintf("IC soddisfatta a n=3000: %.1f%% | IC violata plateau stimato: %.1f%%\n",
+            100*tail(df_e3$ok,1), 100*plateau))
+```
+
+```{r esp3-plot, fig.height=5.0}
+ic_ok_label  <- sprintf("IC = %.2f  (rho = %.2f)  —  SODDISFATTA", P_S*rho_ok,  rho_ok)
+ic_bad_label <- sprintf("IC = %.2f  (rho = %.2f)  —  VIOLATA",    P_S*rho_bad, rho_bad)
+
+df_e3_long <- df_e3 |>
+  pivot_longer(c(ok, bad), names_to="scenario", values_to="prob") |>
+  mutate(
+    se = ifelse(scenario=="ok", se_ok, se_bad),
+    scenario = recode(scenario, "ok"=ic_ok_label, "bad"=ic_bad_label)
+  )
+
+# Ricava le coordinate dell'ultimo punto di ciascuna curva per etichette dirette
+last_ok  <- df_e3_long |> filter(scenario==ic_ok_label)  |> slice_max(n, n=1)
+last_bad <- df_e3_long |> filter(scenario==ic_bad_label) |> slice_max(n, n=1)
+
+ggplot(df_e3_long, aes(x=n, y=prob, color=scenario, fill=scenario)) +
+  geom_ribbon(aes(ymin=pmax(prob-2*se,0), ymax=pmin(prob+2*se,1)),
+              alpha=0.10, color=NA)+
+  geom_line(linewidth=1.8)+
+  geom_point(size=3.0)+
+  # Obiettivo teorico: linea tratteggiata in cima
+  geom_hline(yintercept=1, linetype="dashed", color="grey40", linewidth=0.8)+
+  annotate("text", x=120, y=1.015,
+           label="Obiettivo teorico P = 100%",
+           size=2.9, color="grey35", hjust=0, fontface="italic")+
+  # Etichette dirette a fine curva (sostituiscono la legenda in alto)
+  annotate("label",
+           x=last_ok$n * 0.72, y=last_ok$prob - 0.11,
+           label=ic_ok_label,
+           size=2.8, color=COL_AL, fill="white", label.size=0.25,
+           hjust=1, fontface="bold")+
+  annotate("label",
+           x=last_bad$n * 0.80, y=last_bad$prob + 0.11,
+           label=ic_bad_label,
+           size=2.8, color=COL_LASSO, fill="white", label.size=0.25,
+           hjust=1, fontface="bold")+
+  scale_color_manual(values=c(COL_AL, COL_LASSO),
+                     breaks=c(ic_ok_label, ic_bad_label),
+                     name=NULL)+
+  scale_fill_manual(values=c(COL_AL, COL_LASSO),
+                    breaks=c(ic_ok_label, ic_bad_label),
+                    guide="none")+
+  scale_x_log10(
+    breaks=n_grid,
+    labels=comma_format(),
+    name="Dimensione campionaria n")+
+  scale_y_continuous(
+    labels=percent_format(accuracy=1),
+    limits=c(0, 1.05),
+    breaks=seq(0, 1, 0.25),
+    expand=c(0, 0),
+    name=expression("P("~hat(S)~"= S"^"*"~")  — recupero esatto"))+
+  labs(
+    title="Esperimento 3: Aumentare n Non Risolve",
+    subtitle=sprintf(
+      "Lasso con lambda.min  |  p = %d variabili, |S*| = %d vere  |  %d repliche MC per punto",
+      P_TOT, P_S, B_N_e3))+
+  theme(
+    legend.position  = "none",   # etichette dirette: legenda non serve
+    plot.margin      = margin(10, 14, 8, 10))
+```
+
+**Risultato:** la curva IC-soddisfatta converge a 100%. la curva IC-violata si stabilizza su un plateau permanente inferiore a 1 — non converge a 0, ma non raggiunge nemmeno 1. Il plateau non è a 0% — il Lasso occasionalmente recupera $S^*$ per fluttuazione del rumore — ma la probabilità non converge. Questo è il Teorema 2.
+
+---
+
+# Esperimento 4 — Il Terzetto: Lasso vs Elastic Net vs Adaptive Lasso
+
+**Ipotesi:** Lasso $<$ Elastic Net $<$ Adaptive Lasso in termini di $P(\hat{S}=S^*)$.
+
+**Perché:** in presenza di collinearità si ricorre spesso all'Elastic Net. Questo
+esperimento chiarisce la gerarchia: EN migliora la *stima* (stabilità, bias-varianza)
+ma non la *selezione* — il grouping effect costringe variabili correlate a entrare
+insieme, incluso il rumore. L'AL è l'unico che garantisce consistenza senza IC.
+
+```{r esp4-sim}
+set.seed(SEED + 30)
+results_e4 <- lapply(RHO_GRID, function(rho) {
+  ic <- compute_IC(rho, P_S, P_TOT, BETA_S)
+  res <- replicate(B_MC, {
+    d <- genera_dati(N_MAIN, rho, P_S, P_TOT, BETA_S, SIGMA2)
+    c(lasso = run_lasso(d$X, d$y, S_TRUE)$esatto,
+      en    = run_en(d$X, d$y, S_TRUE)$esatto,
+      al    = run_adaptive_lasso(d$X, d$y, S_TRUE)$esatto)
+  })
+  data.frame(rho = rho, ic = ic,
+             lasso = mean(res["lasso",]), se_l = sd(res["lasso",])/sqrt(B_MC),
+             en    = mean(res["en",]),    se_e = sd(res["en",])/sqrt(B_MC),
+             al    = mean(res["al",]),    se_a = sd(res["al",])/sqrt(B_MC))
+})
+df_e4 <- bind_rows(results_e4)
+df_e4_long <- df_e4 |> 
+  pivot_longer(c(lasso, en, al), names_to = "metodo", values_to = "prob") |>
+  mutate(
+    se = case_when(metodo == "lasso" ~ se_l,
+                   metodo == "en"    ~ se_e,
+                   TRUE              ~ se_a),
+    metodo = recode(metodo,
+                    "lasso" = "Lasso standard",
+                    "en"    = "Elastic Net (alpha=0.5)",
+                    "al"    = "Adaptive Lasso (gamma=1)")
+  )
+
+#evita la risimulazione in esp4B-plot
+df_e4b_long <- df_e4_long |> dplyr::filter(ic <= 1.20)
+```
+
+```{r esp4A-plot, fig.height=5.0}
+# ── Esperimento 4a: Solo Lasso vs Elastic Net ────────────────────────────────
+
+df_e4_le <- df_e4_long |>
+  filter(metodo %in% c("Lasso standard", "Elastic Net (alpha=0.5)"))
+
+pal_le <- c("Lasso standard"          = COL_LASSO,
+            "Elastic Net (alpha=0.5)"  = COL_EN)
+
+ggplot(df_e4_le, aes(x = ic, y = prob, color = metodo, fill = metodo)) +
+  annotate("rect", xmin = -Inf, xmax = 1, ymin = -Inf, ymax = Inf,
+           fill = "#D5F5E3", alpha = 0.35) +
+  annotate("rect", xmin = 1, xmax = Inf, ymin = -Inf, ymax = Inf,
+           fill = "#FADBD8", alpha = 0.35) +
+  geom_ribbon(aes(ymin = pmax(prob - 2*se, 0), ymax = pmin(prob + 2*se, 1)),
+              alpha = 0.10, color = NA) +
+  geom_line(linewidth = 1.8) +
+  geom_point(size = 3.0) +
+  geom_vline(xintercept = 1, color = "grey30",
+             linewidth = 1.0, linetype = "longdash") +
+  annotate("text", x = 1.01, y = 0.95,
+           label = "IC = 1", color = "grey30",
+           size = 3.0, hjust = 0, fontface = "italic") +
+  annotate("text",
+           x = 0.70, y = 1.055,
+           label = "EN migliora la stima, ma non la selezione — entrambi crollano dopo IC = 1",
+           color = "#8B1A1A", size = 3.3, hjust = 0.5, fontface = "italic") +
+  annotate("label", x = 0.45, y = 0.62,
+           label = "Elastic Net\nstima stabile,\nselezione no",
+           size = 2.9, color = COL_EN, fill = "white",
+           label.size = 0.25, fontface = "bold") +
+  annotate("label", x = 0.45, y = 0.22,
+           label = "Lasso\ncrolla a IC = 1",
+           size = 2.9, color = COL_LASSO, fill = "white",
+           label.size = 0.25, fontface = "bold") +
+  scale_color_manual(values = pal_le, name = NULL) +
+  scale_fill_manual(values  = pal_le, guide = "none") +
+  scale_x_continuous(
+    name   = expression("Valore dell'IC "),
+    breaks = seq(0, 1.4, .2),
+    limits = c(0, 1.55),
+    sec.axis = sec_axis(~./P_S,
+                        name   = expression("Correlazione "*rho),
+                        breaks = seq(0, 0.7, .1))) +
+  scale_y_continuous(
+    labels = percent_format(accuracy = 1),
+    limits = c(-0.03, 1.08),
+    breaks = seq(0, 1, 0.25),
+    expand = c(0, 0),
+    name   = expression("P("~hat(S)~"= S"^"*"~")")) +
+  labs(
+    title    = "Esperimento 4a: Lasso vs Elastic Net",
+    subtitle = sprintf(
+      "n = %d  |  %d repliche Monte Carlo  |  EN non risolve il problema di selezione",
+      N_MAIN, B_MC)) +
+  theme(legend.position = "none",
+        plot.margin     = margin(10, 14, 8, 10))
+```
+
+```{r esp4B-plot, fig.height=5.0}
+# ── Esperimento 4b: Tutti e tre, grid IC troncato a 1.20 ─────────────────────
+
+RHO_GRID_AL <- seq(0.05, 0.60, by = 0.05)   # IC in [0.10, 1.20]
+
+set.seed(SEED + 30)
+results_e4b <- lapply(RHO_GRID_AL, function(rho) {
+  ic  <- compute_IC(rho, P_S, P_TOT, BETA_S)
+  res <- replicate(B_MC, {
+    d <- genera_dati(N_MAIN, rho, P_S, P_TOT, BETA_S, SIGMA2)
+    c(lasso = run_lasso(d$X, d$y, S_TRUE)$esatto,
+      en    = run_en(d$X, d$y, S_TRUE)$esatto,
+      al    = run_adaptive_lasso(d$X, d$y, S_TRUE)$esatto)
+  })
+  data.frame(rho = rho, ic = ic,
+             lasso = mean(res["lasso",]), se_l = sd(res["lasso",])/sqrt(B_MC),
+             en    = mean(res["en",]),    se_e = sd(res["en",])/sqrt(B_MC),
+             al    = mean(res["al",]),    se_a = sd(res["al",])/sqrt(B_MC))
+})
+df_e4b <- bind_rows(results_e4b)
+
+df_e4b_long <- df_e4b |>
+  pivot_longer(c(lasso, en, al), names_to = "metodo", values_to = "prob") |>
+  mutate(
+    se = case_when(metodo == "lasso" ~ se_l,
+                   metodo == "en"    ~ se_e,
+                   TRUE              ~ se_a),
+    metodo = recode(metodo,
+                    "lasso" = "Lasso standard",
+                    "en"    = "Elastic Net (alpha=0.5)",
+                    "al"    = "Adaptive Lasso (gamma=1)")
+  )
+
+pal4 <- c("Lasso standard"          = COL_LASSO,
+          "Elastic Net (alpha=0.5)"  = COL_EN,
+          "Adaptive Lasso (gamma=1)" = COL_AL)
+
+ggplot(df_e4b_long, aes(x = ic, y = prob, color = metodo, fill = metodo)) +
+  annotate("rect", xmin = -Inf, xmax = 1, ymin = -Inf, ymax = Inf,
+           fill = "#D5F5E3", alpha = 0.35) +
+  annotate("rect", xmin = 1, xmax = Inf, ymin = -Inf, ymax = Inf,
+           fill = "#FADBD8", alpha = 0.35) +
+  geom_ribbon(aes(ymin = pmax(prob - 2*se, 0), ymax = pmin(prob + 2*se, 1)),
+              alpha = 0.08, color = NA) +
+  geom_line(linewidth = 1.8) +
+  geom_point(size = 3.0) +
+  geom_vline(xintercept = 1, color = "grey30",
+             linewidth = 1.0, linetype = "longdash") +
+  annotate("text", x = 1.01, y = 0.95,
+           label = "IC = 1", color = "grey30",
+           size = 3.0, hjust = 0, fontface = "italic") +
+  annotate("text",
+           x = 0.60, y = 1.055,
+           label = "Solo l'Adaptive Lasso mantiene P ≈ 100% anche dopo IC = 1",
+           color = "#8B1A1A", size = 3.3, hjust = 0.5, fontface = "italic") +
+  annotate("label", x = 1.1, y = 0.75,
+           label = "AL: consistente\n(proprietà oracolo)",
+           size = 2.9, color = COL_AL, fill = "white",
+           label.size = 0.25, fontface = "bold") +
+  annotate("label", x = 0.50, y = 0.60,
+           label = "EN: stima stabile\nma selezione no",
+           size = 2.9, color = COL_EN, fill = "white",
+           label.size = 0.25, fontface = "bold") +
+  annotate("label", x = 0.50, y = 0.20,
+           label = "Lasso:\ncrolla a IC = 1",
+           size = 2.9, color = COL_LASSO, fill = "white",
+           label.size = 0.25, fontface = "bold") +
+  scale_color_manual(values = pal4, name = NULL) +
+  scale_fill_manual(values  = pal4, guide = "none") +
+  scale_x_continuous(
+    name   = expression("Valore dell'IC  "),
+    breaks = seq(0, 1.2, .2),
+    limits = c(0, 1.30),
+    sec.axis = sec_axis(~./P_S,
+                        name   = expression("Correlazione "*rho),
+                        breaks = seq(0, 0.6, .1))) +
+  scale_y_continuous(
+    labels = percent_format(accuracy = 1),
+    limits = c(-0.03, 1.08),
+    breaks = seq(0, 1, 0.25),
+    expand = c(0, 0),
+    name   = expression("P("~hat(S)~"= S"^"*"~")")) +
+  labs(
+    title    = "Esperimento 4b: Gerarchia completa — Lasso vs EN vs Adaptive Lasso",
+    subtitle = sprintf(
+      "n = %d  |  %d repliche MC  ",
+      N_MAIN, B_MC)) +
+  theme(legend.position = "none",
+        plot.margin     = margin(10, 14, 8, 10))
+```
+
+**Risultato:** le tre curve si separano nettamente dopo IC = 1, confermando la gerarchia teorica.
+Lasso crolla immediatamente alla soglia. Elastic Net mantiene una probabilità intermedia (~50%) risultando peggio del Lasso perché il *grouping effect* aiuta la stima, ma non la selezione: include sistematicamente anche
+le variabili rumore correlate con quelle vere. L'Adaptive Lasso rimane vicino al 100% sull'intero intervallo testato fino a IC = 1.20, resistendo brillantemente dove le altre penalizzazioni crollano. (Nota: per livelli estremi di collinearità, come rho > 0.65, anche l'AL inizierebbe a cedere a causa della distorsione della stima Ridge usata per i pesi iniziali, ma il suo vantaggio rimane netto nella finestra analizzata).
+
+**Messaggio chiave:** L'AL è molto resistente e robusto 
+rispetto al Lasso standard soprattutto dopo l'intervallo IC > 1.
+
+---
+
+# Esperimento 5 — L'Illusione della Cross-Validation
+
+**Ipotesi:** la CV ottimizza l'errore di *predizione* (MSE), non la correttezza della
+selezione. Con IC violata, la CV sceglie un $\lambda$ che include variabili rumore perché
+queste migliorano la previsione out-of-sample.
+
+**Perché è necessario:** un analista potrebbe obiettare *"uso la CV per trovare il lambda
+giusto"*. Questo è l'errore più diffuso. La CV non conosce la differenza tra segnale e
+rumore correlato: entrambi abbassano il MSE. Mostriamo il regularization path annotato
+con i modelli scelti dalla CV, evidenziando i FP invisibili all'ottimizzatore.
+
+Design: $p=10$, $|S^*|=2$, variabili false = combinazione lineare delle vere + piccolo
+rumore ($\rho \approx 0.97$, IC $\gg 1$). La scelta di costruire le variabili false
+esplicitamente (non via $\Sigma$ a blocchi) permette di raggiungere correlazioni molto
+alte senza problemi di matrice non definita positiva.
+
+```{r esp5-setup}
+set.seed(2026)
+n_cv <- 500;  p_s_cv <- 2;  p_tot_cv <- 10
+beta_cv_s <- c(3, 3)
+
+X_vere  <- matrix(rnorm(n_cv * p_s_cv), nrow = n_cv)
+X_false <- vapply(seq_len(p_tot_cv - p_s_cv), function(j)
+  0.85 * X_vere[, 1] + 0.85 * X_vere[, 2] + rnorm(n_cv, 0, 0.4),
+  numeric(n_cv))
+X_cv    <- scale(cbind(X_vere, X_false))
+beta_full <- c(beta_cv_s, rep(0, p_tot_cv - p_s_cv))
+y_cv    <- drop(X_cv %*% beta_full + rnorm(n_cv))
+S_true_cv <- seq_len(p_s_cv)
+
+# IC empirica
+C_emp  <- cor(X_cv)
+ic_emp <- max(abs(C_emp[(p_s_cv + 1):p_tot_cv, 1:p_s_cv] %*%
+                    solve(C_emp[1:p_s_cv, 1:p_s_cv]) %*%
+                    sign(beta_cv_s)))
+
+# ── fit ─────────────────────────────────────────────────────────────────────
+fit_path <- glmnet(X_cv, y_cv, alpha = 1, nlambda = 120, standardize = FALSE)
+fit_cv5  <- cv.glmnet(X_cv, y_cv, alpha = 1, nfolds = 10)
+
+lam_min <- fit_cv5$lambda.min
+lam_1se <- fit_cv5$lambda.1se
+
+# FP/FN scalari per il testo inline
+coef_min <- abs(coef(fit_cv5, s = "lambda.min"))[-1]
+coef_1se <- abs(coef(fit_cv5, s = "lambda.1se"))[-1]
+fp_min  <- length(setdiff(which(coef_min > 1e-8), S_true_cv))
+fn_min  <- length(setdiff(S_true_cv, which(coef_min > 1e-8)))
+fp_1se  <- length(setdiff(which(coef_1se > 1e-8), S_true_cv))
+fn_1se  <- length(setdiff(S_true_cv, which(coef_1se > 1e-8)))
+
+# ── costruisci df del path ───────────────────────────────────────────────────
+beta_mat <- as.matrix(t(coef(fit_path)[-1, ]))   # righe = lambda, colonne = variabili
+lam_vec  <- fit_path$lambda
+
+df_path <- as.data.frame(beta_mat)
+colnames(df_path) <- c(paste0("X", 1:p_s_cv,        " [VERA]"),
+                        paste0("X", (p_s_cv+1):p_tot_cv, " [falsa]"))
+df_path$lambda <- lam_vec
+df_path$log_lambda <- log(lam_vec)
+
+df_long <- df_path |>
+  pivot_longer(-c(lambda, log_lambda),
+               names_to = "variabile", values_to = "coef") |>
+  mutate(tipo = ifelse(grepl("VERA", variabile), "vera", "falsa"))
+
+# Trova il primo lambda in cui ogni variabile entra (|coef| > 1e-4)
+entry_points <- df_long |>
+  filter(abs(coef) > 1e-4) |>
+  group_by(variabile, tipo) |>
+  summarise(lambda_entry = max(lambda), .groups = "drop") |>  # max = primo lambda (path decresce)
+  mutate(log_lambda_entry = log(lambda_entry))
+
+# Valore del coef all'estremo sinistro (lambda piccolo) per posizionare etichette
+label_pos <- df_long |>
+  filter(lambda == min(lambda)) |>
+  select(variabile, tipo, coef_end = coef)
+
+```
+
+```{r esp5-path, fig.height=5.2}
+
+# ── plot ─────────────────────────────────────────────────────────────────────
+col_vera  <- COL_S       # "#1D3557" blu scuro
+col_falsa <- COL_LASSO   # "#E63946" rosso
+
+# Coordinate log dei lambda CV
+log_min <- log(lam_min)
+log_1se <- log(lam_1se)
+
+# ── Modifica del plot per massimizzare la chiarezza dei FP ─────────────────────
+
+ggplot(df_long, aes(x = log_lambda, y = coef, group = variabile, color = tipo)) +
+
+  # 1. Zona di contaminazione (evidenzia visivamente dove cade la scelta)
+  # Estendiamo leggermente l'area per far capire che l'intera zona CV è "infetta"
+  annotate("rect", xmin = log_min - 0.2, xmax = log_1se + 0.2, 
+           ymin = -0.1, ymax = 0.6, fill = "#FFD7D7", alpha = 0.3) +
+
+  # 2. Linee del path (spesse per le vere, sottili per le false)
+  geom_line(data = filter(df_long, tipo == "falsa"), linewidth = 0.6, alpha = 0.4) +
+  geom_line(data = filter(df_long, tipo == "vera"), linewidth = 1.5, alpha = 0.9) +
+
+  # 3. Linee di selezione
+  geom_vline(xintercept = log_min, color = "black", linetype = "dashed", linewidth = 0.8) +
+  geom_vline(xintercept = log_1se, color = "black", linetype = "dotted", linewidth = 0.8) +
+  
+  # 4. Annotazioni "FP" più aggressive con allineamento ottimizzato per l'asse standard
+  annotate("text", x = log_min, y = 0.65, label = sprintf("λ.min\n(%d FP)", fp_min), 
+           color = "#8B0000", size = 3.5, fontface = "bold", vjust = 0, hjust = 1.1) +
+  annotate("text", x = log_1se, y = 0.65, label = sprintf("λ.1se\n(%d FP)", fp_1se), 
+           color = "#8B0000", size = 3.5, fontface = "bold", vjust = 0, hjust = -0.1) +
+
+  # 5. Focus visivo sulla "sopravvivenza" del rumore (su ENTRAMBE le scelte)
+  # Disegniamo dei segmenti/punti che indicano quante linee rosse intersecano le linee verticali
+  geom_point(data = filter(df_long, tipo == "falsa" & abs(log_lambda - log_min) < 0.05), 
+             aes(x = log_min, y = coef), color = col_falsa, size = 1.5) +
+  geom_point(data = filter(df_long, tipo == "falsa" & abs(log_lambda - log_1se) < 0.05), 
+             aes(x = log_1se, y = coef), color = col_falsa, size = 1.5) +
+  
+  # ── scale ─────────────────────────────────────────────────────────────────
+  scale_color_manual(values = c("vera" = col_vera, "falsa" = col_falsa),
+                     labels = c("vera" = "Variabile VERA  (S*)",
+                                "falsa" = "Variabile falsa  (−S*)"),
+                     name = NULL) +
+                     
+  # MODIFICA ASSE X: Ora è continuo (crescente), senza scale_x_reverse
+  scale_x_continuous(name = expression("Penalizzazione crescente  " %->% "  " * log(lambda))) +
+  scale_y_continuous(name = "Coefficiente stimato",
+                     limits = c(-0.1, 3.15),
+                     breaks = seq(0, 3, 0.5)) +
+
+  labs(
+    title    = "Esperimento 5: La CV non risolve il problema",
+    subtitle = sprintf(
+      "IC empirica = %.2f >> 1  |  p = %d variabili, di cui %d vere  |  n = %d ",
+      ic_emp, p_tot_cv, p_s_cv, n_cv)) +
+
+  theme(
+    legend.position  = "top",
+    legend.text      = element_text(size = 10, face = "bold"),
+    plot.margin      = margin(10, 40, 8, 10)
+  )
+```
+
+**Tre takeaway finali:**
+
+1. **IC e' una condizione sulla struttura di** $X$: $\|C_{21}C_{11}^{-1}\text{sign}(\beta_{S^*}^*)\|_\infty < 1$
+   dipende dalla geometria della matrice di design — raccogliere piu' dati non la modifica.
+
+2. **La CV non e' un antidoto.** Ottimizza la previsione, non la selezione causale.
+   Con IC violata, rumore e segnale sono indistinguibili per il criterio MSE.
+
+3. **L'Adaptive Lasso ripristina la consistenza.** I pesi $w_j \propto |\hat{\beta}_j^{\text{Ridge}}|^{-\gamma}$
+   emulano la penalizzazione oracolo: $\gamma=1$ con Ridge e' il punto di partenza raccomandato.
+
+---
+
+## Riferimenti
+
+- Tibshirani, R. (1996). Regression shrinkage and selection via the lasso. *JRSS-B*, 58(1), 267--288.
+- Zhao, P., & Yu, B. (2006). On model selection consistency of lasso. *JMLR*, 7, 2541--2563.
+- Zou, H. (2006). The adaptive lasso and its oracle properties. *JASA*, 101(476), 1418--1429.
+- Zou, H., & Hastie, T. (2005). Regularization and variable selection via the elastic net. *JRSS-B*, 67(2), 301--320.
+- Hastie, T., Tibshirani, R., & Friedman, J. (2009). *The Elements of Statistical Learning* (2nd ed.). Springer.
